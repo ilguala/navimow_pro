@@ -51,6 +51,39 @@ There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="images/map.png" alt="App-style map camera" width="460"><br>
+  <em>Map camera — zones with mowed %, dashed (virtual) vs solid (ride-on) boundaries,
+  obstacles, no-mow areas, dock, the live mower and a persistent mowed-trail overlay.</em>
+</p>
+
+<p align="center">
+  <img src="images/dashboard.png" alt="Dashboard tiles" width="900"><br>
+  <em>A dashboard built from the entities plus the bundled <code>Mow now</code> button.</em>
+</p>
+
+<p align="center">
+  <img src="images/scheduler-card.png" alt="Mowing schedule card" width="420">
+  &nbsp;
+  <img src="images/mow-card.png" alt="Mow now dialog" width="380"><br>
+  <em>Bundled cards: the weekly schedule editor and the <code>Mow now</code> dialog
+  (pick a zone, restart-from-zero vs continue).</em>
+</p>
+
+<p align="center">
+  <img src="images/controls.png" alt="Controls" width="300">
+  &nbsp;
+  <img src="images/sensors.png" alt="Sensors" width="300">
+  &nbsp;
+  <img src="images/configuration.png" alt="Configuration and diagnostics" width="300"><br>
+  <em>Auto-created entities under a single device: controls, sensors, and
+  configuration &amp; diagnostics.</em>
+</p>
+
+---
+
 ## Installation (HACS custom repository)
 
 1. In Home Assistant open **HACS → Integrations → ⋮ → Custom repositories**.
