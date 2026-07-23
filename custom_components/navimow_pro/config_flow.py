@@ -136,10 +136,21 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                     # NOT listed in auth-list (which only returns owned vehicles).
                     # Fall back to letting the user enter the serial manually.
                     return await self.async_step_manual()
-                elif len(self._vehicles) == 1:
-                    return await self._create(self._vehicles[0])
-                else:
-                    return await self.async_step_select_vehicle()
+                # Multi-mower accounts: only offer mowers not already configured.
+                configured = {e.unique_id for e in self._async_current_entries()}
+                remaining = [
+                    v
+                    for v in self._vehicles
+                    if str(v.get("vehicle_sn")) not in configured
+                ]
+                if not remaining:
+                    # Every listed mower is already added; allow adding one by
+                    # serial (e.g. a shared mower that isn't in this account list).
+                    return await self.async_step_manual()
+                self._vehicles = remaining
+                if len(remaining) == 1:
+                    return await self._create(remaining[0])
+                return await self.async_step_select_vehicle()
 
         return self.async_show_form(
             step_id="user", data_schema=_USER_SCHEMA, errors=errors

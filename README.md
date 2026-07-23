@@ -21,14 +21,27 @@ All entities live under a single Home Assistant device (the mower).
 | Platform | Entity | Notes |
 |---|---|---|
 | `lawn_mower` | Mower | Start / Pause / Dock (+ Resume via Start when paused) |
-| `sensor` | Battery, Status, Mowing progress, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
+| `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
 | `binary_sensor` | Problem, Online, Docked | |
-| `select` | Mow zone | Selecting a zone (or "All zones") starts mowing it |
+| `select` | Mow zone | Stores which zone the `lawn_mower` Start button will mow (or "All zones") — it does **not** start mowing itself |
 | `switch` | Night mowing (proven), Rain sensor, Rain detection, Sound, Power saving | Non-proven toggles are opt-in / disabled by default |
-| `camera` | Map | Lightweight SVG of the mower path + position |
+| `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), obstacles / no-mow areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
 
-Motion commands (start / pause / dock / zone select) only ever fire on an
-explicit user action. Nothing auto-mows on setup or on a poll.
+Motion commands (start / pause / dock) only ever fire on an explicit user
+action. Nothing auto-mows on setup or on a poll.
+
+### Lovelace cards & service
+
+The integration bundles and **auto-registers** two custom cards (no manual
+Lovelace resource needed) — just add them from the dashboard card picker:
+
+- **`custom:navimow-scheduler-card`** — edit the weekly mowing plan (per-day
+  on/off, time periods, per-period zones).
+- **`custom:navimow-mow-card`** — a *Mow now* button that opens a dialog to pick
+  a zone (or all) and choose *restart from zero* vs *continue*.
+
+There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
+**`navimow_pro.set_schedule`** service for automations.
 
 ---
 
@@ -45,24 +58,56 @@ Assistant `config/custom_components/` folder and restart.)
 
 ---
 
-## Recommended setup — use a shared account
+## Recommended setup — a dedicated shared account
 
-The Navimow cloud binds an app session to a device id. To avoid disturbing the
-session on your phone, **do not** log the integration in with your primary
-account. Instead:
+**Strongly recommended: do not use your primary Navimow account for the
+integration.** The Navimow cloud binds an app session to a device id, and a new
+login can disturb the session running on your phone. Instead, use a **dedicated
+second account that the mower is _shared_ to**:
 
-1. Create a **second Navimow account** (a dedicated email).
-2. In the Navimow app on your phone, **share the mower** to that second account.
-3. Add this integration using the **second account's** email + password.
+1. **Create a second Navimow account** — in the Navimow app, log out and sign up
+   with a different email (any address you control). This is the account Home
+   Assistant will use.
+2. **Share the mower to it** — log back in on your phone with your **primary**
+   account, open the mower, and use the app's *share device* / *family sharing*
+   feature to share the mower with the second account's email.
+3. **Add the integration** with the **second account's** email + password
+   (Settings → Devices & Services → Add Integration → *Navimow (Private)*).
 
 Home Assistant generates and persists its **own** device id, so it registers as
-a distinct, coexisting session. Your phone keeps working normally. (This
-coexistence was verified live with a shared account.)
+a distinct, coexisting session — your phone keeps working normally (verified
+live with a shared account). Your password is **not** stored; only the
+refresh/access tokens are kept and refreshed perpetually. If the session ever
+fully expires, Home Assistant raises a re-authentication prompt.
 
 During setup the integration performs: passport login → device registration
-(`user/user/login`) → vehicle discovery (`auth-list`). Your password is **not**
-stored — only the refresh/access tokens are kept and refreshed perpetually. If
-the session ever fully expires, Home Assistant raises a re-authentication prompt.
+(`user/user/login`) → vehicle discovery (`auth-list`).
+
+---
+
+## Multiple mowers
+
+An account can own more than one mower. Add them as **one integration entry per
+mower**:
+
+- **Owned mowers** — run **Add Integration → Navimow (Private)** once per mower.
+  If the account lists several, a picker appears; mowers you have already added
+  are hidden, so just pick the next one (a single remaining mower is added
+  automatically).
+- **Shared mowers** (an account that owns none — e.g. the recommended shared
+  account) — use the manual serial step once per mower.
+
+Each mower becomes its own Home Assistant device with its own entities, cards
+and (persisted) map/trail. The `navimow_pro.mow` / `navimow_pro.set_schedule`
+services take a `device_id`, so they always target the right mower (required
+once more than one is configured).
+
+> **Note — untested with 2+ mowers on one account.** The single-mower path is
+> well tested; multiple mowers on the **same** account is supported by design
+> but not yet verified live. Each entry logs in with its own device id
+> (independent sessions); if the cloud turns out to enforce one session per
+> account, the entries could contend for the token. If you hit repeated re-auth
+> prompts with several mowers on one account, please open an issue.
 
 ---
 
@@ -86,22 +131,19 @@ Zone encoding is handled for you (little-endian `partitionIds` + the available
 
 ---
 
-## How it works (protocol summary)
+## How it works (high level)
 
-- **Passport auth** (`api-passport-fra.willand.com`): signed `/v3/user/login` and
-  `/v3/user/refresh`. The request sign is
-  `SHA256(sorted "k=v&..." of {app_version, clientKey, os, os_language, os_version,
-  timestamp, url} + params)`.
-- **Mower cloud** (`navimow-fra.ninebot.com`, protocol `p:101`): each request is
-  an envelope `{d,h,k,p,t}` — `k` = RSA-1024 PKCS#1 v1.5 wrap of a per-request
-  AES key, `d` = AES-128-CBC of the plaintext, `h` = MD5 of the plaintext. The
-  business identity (`uid`, `access_token`, `device_id`) travels **inside** the
-  encrypted payload, never in HTTP headers. Responses `{r,s,v}` decrypt with a
-  fixed session key. These crypto constants are app-wide (shared by all users),
-  not user secrets.
-- Polling is every 30 s (12 s while actively mowing / returning). The crypto is
-  CPU-bound and synchronous, so all of it runs in Home Assistant's executor and
-  never blocks the event loop.
+- **Authentication** — it signs in to the vendor's account service (the same one
+  the mobile app uses) and keeps a refreshable session. No vendor developer
+  program or public API key is required; you only ever provide your own login.
+- **Mower cloud** — status and commands use the mobile app's own encrypted
+  request format, so the integration talks to the mower the same way the app
+  does. Your account identity travels inside the encrypted payload, not in plain
+  HTTP headers. The protocol constants involved are app-wide (identical for every
+  user of the app), not personal secrets.
+- **Performance** — the encryption is CPU-bound and runs entirely in Home
+  Assistant's executor, so it never blocks the event loop. Polling is every 30 s,
+  and faster (~12 s) while the mower is actively mowing or returning.
 
 ---
 
@@ -126,8 +168,12 @@ or value `unknown`) rather than crashing:
   on firmwares that name them differently.
 - **Maintenance (blades / chassis).** Field names are firmware-specific; parsed
   defensively from `get-component-maintenance`.
-- **Camera.** The full perimeter polygon lives in a compressed map blob that this
-  integration does not decode, so the map shows path + position only.
+- **Map / coverage / trail.** The map geometry (zone boundaries with per-segment
+  attributes, obstacles, no-mow areas, dock) **is** decoded from the map-detail
+  endpoint, and per-zone mowed coverage comes from `get-path-info-time`. The
+  exact per-stripe swept path (`get-path-info-data-compress`) is not accessible
+  on this firmware, so the mowed **trail** overlay is reconstructed by sampling
+  the mower's position while it cuts — persisted across restarts, best-effort.
 - **Region/host.** Fixed to the `fra` region hosts, matching the proven setup.
 
 ---
