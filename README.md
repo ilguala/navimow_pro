@@ -1,5 +1,10 @@
 # Navimow (Private) — Home Assistant integration
 
+[![Donate with PayPal](https://www.paypalobjects.com/en_US/IT/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=M325UXAK93XHL)
+
+If this integration is useful to you, a donation to support development is always
+welcome — thank you! 🙏
+
 Unofficial Home Assistant custom integration for **Segway Navimow** robot mowers
 (i-series, e.g. i108). It talks to the same private mobile-app cloud the official
 app uses (`navimow-fra.ninebot.com`), so it works without the vendor's public
