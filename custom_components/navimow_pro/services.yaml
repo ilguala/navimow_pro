@@ -1,0 +1,74 @@
+set_schedule:
+  name: Set mowing schedule (day)
+  description: >-
+    Overwrite the mowing plan for one weekday: enable/disable it and provide one
+    or more time periods, each optionally restricted to specific zones. This
+    replaces that weekday's schedule.
+  fields:
+    device_id:
+      name: Mower
+      description: Target mower (only required if more than one is configured).
+      required: false
+      selector:
+        device:
+          integration: navimow_pro
+    day:
+      name: Day
+      description: Weekday to program.
+      required: true
+      selector:
+        select:
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    enabled:
+      name: Enabled
+      description: Whether the mower mows on this day.
+      default: true
+      selector:
+        boolean:
+    periods:
+      name: Periods
+      description: >-
+        List of time windows. Each item: start "HH:MM", end "HH:MM", and an
+        optional zones list of region ids (empty = all zones). Multiple items =
+        multiple mowing sessions that day.
+      required: false
+      example: '[{"start": "09:45", "end": "17:15", "zones": []}]'
+      selector:
+        object:
+
+mow:
+  name: Mow now
+  description: >-
+    Start mowing immediately: the chosen zones (empty = all) with a
+    restart-vs-continue choice.
+  fields:
+    device_id:
+      name: Mower
+      description: Target mower (only required if more than one is configured).
+      required: false
+      selector:
+        device:
+          integration: navimow_pro
+    zones:
+      name: Zones
+      description: >-
+        Region ids to mow (e.g. [1] or [1,5]). Leave empty to mow all zones.
+      required: false
+      example: "[1]"
+      selector:
+        object:
+    reset:
+      name: Restart from scratch
+      description: >-
+        On = "Cancella i progressi e riparti da zero" (re-mow the whole zone).
+        Off = continue, mowing only the area not yet cut.
+      default: true
+      selector:
+        boolean:

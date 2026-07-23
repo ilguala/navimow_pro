@@ -1,0 +1,156 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Navimow (Private) login",
+        "description": "Enter the email and password of the Segway/Navimow account that owns (or was shared) the mower. Tip: use a dedicated account that the mower is shared with, so your primary phone session is not disturbed.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "select_vehicle": {
+        "title": "Choose a mower",
+        "description": "More than one mower was found on this account.",
+        "data": {
+          "vehicle_sn": "Mower"
+        }
+      },
+      "manual": {
+        "title": "Enter your mower's serial",
+        "description": "No mower is listed on this account (this is normal for a shared account). Enter the mower serial number (found in the Navimow app under device info, e.g. S4THAxxxxxxxxxx). It will be validated with a live read.",
+        "data": {
+          "vehicle_sn": "Serial number",
+          "vehicle_name": "Name (optional)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Navimow",
+        "description": "The stored session expired. Enter the account password again.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not reach the Navimow cloud. Try again.",
+      "no_vehicles": "No mower is associated with this account.",
+      "vehicle_not_found": "That serial could not be read on this account. Check the serial and that the mower is shared with this account.",
+      "unknown": "Unexpected error. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This mower is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Navimow options",
+        "description": "Zone list for the zone selector, as a comma-separated list of id:name pairs (for example: 1:Zone 1,5:Zone 2). The region id is the map partition id. Leave blank to rely on auto-discovery.",
+        "data": {
+          "zones": "Zones (id:name,...)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lawn_mower": {
+      "mower": {
+        "name": "Mower"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "state": {
+        "name": "Status"
+      },
+      "state_code": {
+        "name": "State code"
+      },
+      "mowing_progress": {
+        "name": "Mowing progress"
+      },
+      "current_zone": {
+        "name": "Current zone"
+      },
+      "session_area": {
+        "name": "Session area"
+      },
+      "weekly_area": {
+        "name": "Area this week"
+      },
+      "total_area": {
+        "name": "Total area"
+      },
+      "next_mow": {
+        "name": "Next mow"
+      },
+      "error_text": {
+        "name": "Error"
+      },
+      "signal_wifi": {
+        "name": "Wi-Fi signal"
+      },
+      "blades_life": {
+        "name": "Blades life"
+      },
+      "chassis_life": {
+        "name": "Chassis life"
+      },
+      "schedule": {
+        "name": "Schedule"
+      },
+      "coverage": {
+        "name": "Coverage"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Mowing schedule"
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      },
+      "online": {
+        "name": "Online"
+      },
+      "docked": {
+        "name": "Docked"
+      }
+    },
+    "switch": {
+      "night_mow": {
+        "name": "Night mowing"
+      },
+      "rain_sensor": {
+        "name": "Rain sensor"
+      },
+      "rain_detection": {
+        "name": "Rain detection"
+      },
+      "sound": {
+        "name": "Sound"
+      },
+      "power_saving": {
+        "name": "Power saving"
+      }
+    },
+    "select": {
+      "zone": {
+        "name": "Mow zone"
+      }
+    },
+    "camera": {
+      "map": {
+        "name": "Map"
+      }
+    }
+  }
+}

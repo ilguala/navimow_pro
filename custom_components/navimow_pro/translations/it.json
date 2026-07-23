@@ -1,0 +1,156 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Accesso Navimow (Privata)",
+        "description": "Inserisci email e password dell'account Segway/Navimow che possiede (o a cui e' stato condiviso) il robot. Consiglio: usa un account dedicato a cui il robot e' condiviso, cosi' la sessione del telefono principale non viene disturbata.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "select_vehicle": {
+        "title": "Scegli un robot",
+        "description": "Su questo account e' presente piu' di un robot.",
+        "data": {
+          "vehicle_sn": "Robot"
+        }
+      },
+      "manual": {
+        "title": "Inserisci il seriale del robot",
+        "description": "Su questo account non risulta alcun robot (normale per un account condiviso). Inserisci il numero di serie del robot (lo trovi nell'app Navimow nelle info dispositivo, es. S4THAxxxxxxxxxx). Verra' validato con una lettura live.",
+        "data": {
+          "vehicle_sn": "Numero di serie",
+          "vehicle_name": "Nome (opzionale)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ri-autentica Navimow",
+        "description": "La sessione salvata e' scaduta. Reinserisci la password dell'account.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Email o password non validi.",
+      "cannot_connect": "Impossibile raggiungere il cloud Navimow. Riprova.",
+      "no_vehicles": "Nessun robot associato a questo account.",
+      "vehicle_not_found": "Non riesco a leggere quel seriale su questo account. Controlla il seriale e che il robot sia condiviso con questo account.",
+      "unknown": "Errore imprevisto. Controlla i log."
+    },
+    "abort": {
+      "already_configured": "Questo robot e' gia' configurato.",
+      "reauth_successful": "Ri-autenticazione riuscita."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni Navimow",
+        "description": "Elenco delle zone per il selettore, come lista separata da virgole di coppie id:nome (esempio: 1:Zona 1,5:Zona 2). L'id regione e' l'id della partizione della mappa. Lascia vuoto per affidarti all'auto-rilevamento.",
+        "data": {
+          "zones": "Zone (id:nome,...)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lawn_mower": {
+      "mower": {
+        "name": "Robot"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Batteria"
+      },
+      "state": {
+        "name": "Stato"
+      },
+      "state_code": {
+        "name": "Codice stato"
+      },
+      "mowing_progress": {
+        "name": "Avanzamento taglio"
+      },
+      "current_zone": {
+        "name": "Zona attuale"
+      },
+      "session_area": {
+        "name": "Area sessione"
+      },
+      "weekly_area": {
+        "name": "Area questa settimana"
+      },
+      "total_area": {
+        "name": "Area totale"
+      },
+      "next_mow": {
+        "name": "Prossima falciatura"
+      },
+      "error_text": {
+        "name": "Errore"
+      },
+      "signal_wifi": {
+        "name": "Segnale Wi-Fi"
+      },
+      "blades_life": {
+        "name": "Usura lame"
+      },
+      "chassis_life": {
+        "name": "Usura telaio"
+      },
+      "schedule": {
+        "name": "Programmazione"
+      },
+      "coverage": {
+        "name": "Copertura"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Programma di taglio"
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problema"
+      },
+      "online": {
+        "name": "Online"
+      },
+      "docked": {
+        "name": "Parcheggiato"
+      }
+    },
+    "switch": {
+      "night_mow": {
+        "name": "Falciatura notturna"
+      },
+      "rain_sensor": {
+        "name": "Sensore pioggia"
+      },
+      "rain_detection": {
+        "name": "Rilevamento pioggia"
+      },
+      "sound": {
+        "name": "Suono"
+      },
+      "power_saving": {
+        "name": "Risparmio energetico"
+      }
+    },
+    "select": {
+      "zone": {
+        "name": "Zona di taglio"
+      }
+    },
+    "camera": {
+      "map": {
+        "name": "Mappa"
+      }
+    }
+  }
+}

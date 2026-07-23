@@ -1,0 +1,13 @@
+{
+  "domain": "navimow_pro",
+  "name": "Navimow (Private)",
+  "after_dependencies": ["http", "frontend"],
+  "codeowners": ["@ilguala"],
+  "config_flow": true,
+  "documentation": "https://github.com/ilguala/navimow_pro",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ilguala/navimow_pro/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
