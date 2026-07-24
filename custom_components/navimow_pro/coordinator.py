@@ -143,7 +143,6 @@ def _parse_zone_options(raw: str | None) -> list[dict]:
 
 
 # --------------------------------------------------------------------- map
-# Weekday labels (plan.day is 1=Mon..7=Sun).
 # Navimow weekday numbering is 1=Sun .. 7=Sat (verified live: day 3 = Tue, 6 = Fri).
 _WEEKDAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 
@@ -350,17 +349,34 @@ def _slot_hhmm(slot: Any) -> str | None:
     return f"{(m // 60) % 24:02d}:{m % 60:02d}"
 
 
+def _schedule_source(set_list: Any) -> Any:
+    """The *live* weekly plan the app shows and the robot obeys.
+
+    The current schedule lives in ``workPlanV2`` (a.k.a. ``plan_v2``). The legacy
+    ``plan`` field is dead -- the app stopped maintaining it and it stays frozen
+    at an old value, so it is used only as a last resort. Verified live: editing
+    a day updates ``workPlanV2`` while ``plan`` does not move. The two accepted
+    key spellings cover whichever the ``set-list`` response uses.
+    """
+    if not isinstance(set_list, dict):
+        return None
+    return (
+        set_list.get("plan_v2")
+        or set_list.get("workPlanV2")
+        or set_list.get("plan")
+    )
+
+
 def _parse_schedule(set_list: Any, zone_names: dict) -> list[dict]:
     """Normalize the weekly mowing plan into a UI/calendar-friendly structure.
 
-    Source: ``set_list.plan_v2`` (preferred; carries per-period zones) or
-    ``plan``. Entry: ``{day:1-7 (1=Mon), open:0/1, period:[{start_time,end_time,
-    partition_ids}|[start,end]]}``; start/end are 15-minute slots from 00:00,
-    empty ``partition_ids`` means all zones. Fully defensive.
+    Source: :func:`_schedule_source` (``workPlanV2``/``plan_v2``; the legacy
+    ``plan`` only as a fallback). Entry: ``{day:1-7 (1=Sun), open:0/1,
+    period:[{start_time,end_time,partition_ids}|[start,end]]}``; start/end are
+    15-minute slots from 00:00, empty ``partition_ids`` means all zones. Fully
+    defensive.
     """
-    plan = None
-    if isinstance(set_list, dict):
-        plan = set_list.get("plan_v2") or set_list.get("plan")
+    plan = _schedule_source(set_list)
     if not isinstance(plan, list):
         return []
     out: list[dict] = []
@@ -448,14 +464,16 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
 
 
 def _compute_next_mow(set_list: Any, now: Any) -> str | None:
-    """Next scheduled mow from ``set_list.plan`` as a readable "Wed 09:45".
+    """Next scheduled mow as a readable "Tue 04:45".
 
-    ``plan`` is a list of ``{day:1-7 (1=Mon), open:0/1, period:[[start,end],...]}``
-    where start/end are 15-minute slot indices from 00:00 (39 -> 09:45). Returns
-    the soonest upcoming open day+start relative to ``now`` (searching a full
-    week including today), or ``None`` if nothing is scheduled.
+    Reads the *live* plan via :func:`_schedule_source` (``workPlanV2``, NOT the
+    dead legacy ``plan`` field). Each entry is ``{day:1-7 (1=Sun), open:0/1,
+    period:[{start_time,end_time,...}|[start,end]]}`` where start/end are
+    15-minute slot indices from 00:00 (19 -> 04:45). Returns the soonest upcoming
+    open day+start relative to ``now`` (searching a full week including today),
+    or ``None`` if nothing is scheduled.
     """
-    plan = set_list.get("plan") if isinstance(set_list, dict) else None
+    plan = _schedule_source(set_list)
     if not isinstance(plan, list):
         return None
     day_starts: dict[int, list[int]] = {}
@@ -850,6 +868,41 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         sound = _as_bool(_find(set_list, "soundSwitch", "sound_switch"))
         power_saving = _as_bool(_find(set_list, "lowPowerSet", "low_power_set"))
         child_lock = _as_bool(_find(set_list, "childLock", "child_lock"))
+        # "modern" MowerSettingBean toggles (write via save-set-data + iot_set;
+        # feature-detected downstream -- entity created only when the key is
+        # actually reported, so other models only see what they have).
+        lift_alarm = _as_bool(_find(set_list, "liftSwitch", "lift_switch"))
+        mowing_cycle = _as_bool(_find(set_list, "mowingCycle", "mowing_cycle"))
+        frost_delay = _as_bool(_find(set_list, "frostSwitch", "frost_switch"))
+        snow_delay = _as_bool(_find(set_list, "snowSwitch", "snow_switch"))
+        storm_delay = _as_bool(_find(set_list, "stormSwitch", "storm_switch"))
+        high_temp_delay = _as_bool(_find(set_list, "highTempSwitch", "high_temp_switch"))
+        # vision / advanced (captured live): slamSwitch=EFLS (camera positioning),
+        # cptSwitch=obstacle avoidance, tractionControl=traction. animalProtection
+        # and lightSwitch are write-only (not reported) -> no read here.
+        efls = _as_bool(_find(set_list, "slamSwitch", "slam_switch"))
+        obstacle_avoid = _as_bool(_find(set_list, "cptSwitch", "cpt_switch"))
+        traction = _as_bool(_find(set_list, "tractionControl", "traction_control"))
+        night_light_level = _as_int(_find(set_list, "nightLightLevel", "night_light_level"))
+        # rain / weather-forecast zone (captured live, distinct from the physical
+        # rainSensor/rainDetectionSwitch above): weatherSwitch=master on/off,
+        # weatherSensitivity=drizzle 0/light 1/moderate 2, delayedPileSwitch=
+        # continue(0)/delay(1), delayedPileSet=delay time (wire = hours*4).
+        weather_switch = _as_bool(_find(set_list, "weatherSwitch", "weather_switch"))
+        weather_sensitivity = _as_int(_find(set_list, "weatherSensitivity", "weather_sensitivity"))
+        rain_behavior = _as_bool(_find(set_list, "delayedPileSwitch", "delayed_pile_switch"))
+        # delayedPileSet: try decimal (set-list style) then hex; store the raw wire
+        # value (number.py divides by the per-entity scale to show hours).
+        _rd = _find(set_list, "delayedPileSet", "delayed_pile_set")
+        rain_delay_wire: int | None = None
+        if _rd is not None:
+            try:
+                rain_delay_wire = int(str(_rd).strip(), 10)
+            except (TypeError, ValueError):
+                try:
+                    rain_delay_wire = int(str(_rd).strip(), 16)
+                except (TypeError, ValueError):
+                    rain_delay_wire = None
 
         settings = {
             "night_mow": night_mow,
@@ -858,8 +911,27 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "sound": sound,
             "power_saving": power_saving,
             "child_lock": child_lock,
+            "lift_alarm": lift_alarm,
+            "mowing_cycle": mowing_cycle,
+            "frost_delay": frost_delay,
+            "snow_delay": snow_delay,
+            "storm_delay": storm_delay,
+            "high_temp_delay": high_temp_delay,
+            "efls": efls,
+            "obstacle_avoid": obstacle_avoid,
+            "traction": traction,
+            "night_light_level": night_light_level,
             "cut_height": _as_int(_find(set_list, "height")),
+            # set-list reports these percentages as DECIMAL (10 / 100). Only the
+            # app's internal bean and the device (s:mower) write use hex -- the
+            # number entities write hex to the robot, decimal to the cloud.
+            "return_battery_level": _as_int(_find(set_list, "returnBatteryLevel")),
             "charging_limit": _as_int(_find(set_list, "chargingLimit")),
+            # rain / weather-forecast zone
+            "weather_switch": weather_switch,
+            "weather_sensitivity": weather_sensitivity,
+            "rain_behavior": rain_behavior,
+            "rain_delay_wire": rain_delay_wire,
         }
 
         # --- maintenance (blades / chassis) -- field names are firmware-specific

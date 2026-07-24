@@ -416,8 +416,74 @@ class NavimowCloudClient:
         """
         return self.save_setting(sn, {write_key: "01" if on else "00"})
 
+    def save_setting_iot(self, sn: str, vehicle_type: Any, data: dict) -> Any:
+        """Write MowerSettingBean keys via save-set-data + operation_type 'iot_set'.
+
+        Required for the "modern" settings (childLock/liftSwitch/mowingCycle/
+        frostSwitch/snowSwitch/stormSwitch/highTempSwitch/returnBatteryLevel/
+        chargingLimit): the plain :meth:`save_setting` form is acked (code:1) but
+        NOT applied for these keys. Captured live from the app; a restore batch
+        was verified applied on the owner account.
+        """
+        return self.call(
+            "/vehicle/set/save-set-data",
+            {
+                "vehicle_sn": sn,
+                "vehicle_type": str(vehicle_type),
+                "data": data,
+                "operation_type": "iot_set",
+            },
+        )
+
+    def set_iot_bool(
+        self, sn: str, vehicle_type: Any, write_key: str, on: bool, numeric: bool = False
+    ) -> Any:
+        """Boolean "modern" setting. Per-key encoding matches the app: some keys
+        take a JSON number (1/0), others a string ('1'/'0')."""
+        value: Any = (1 if on else 0) if numeric else ("1" if on else "0")
+        return self.save_setting_iot(sn, vehicle_type, {write_key: value})
+
+    def send_setting_device(self, sn: str, robot_data: dict) -> Any:
+        """Push a MowerSettingBean change straight to the robot.
+
+        Device command ``cmdCode="s:mower"`` on ``/vehicle/set/send`` (the proven
+        control endpoint, same as mow/dock), ``data`` a JSON *string* -- exactly
+        the form the app fires alongside every settings write. The cloud
+        (``iot_set``) copy alone is acked but the robot does NOT apply it (it
+        reverts to its onboard value), so this command is what actually takes
+        effect (verified live with the schedule). The per-key value encoding
+        differs from the cloud form and lives in the switch/select descriptions.
+        Refused (5001) while the mower is running, same as the app.
+        """
+        return self.call(
+            "/vehicle/set/send",
+            {
+                "vehicle_sn": sn,
+                "cmdCode": "s:mower",
+                "data": json.dumps(robot_data, separators=(",", ":")),
+            },
+        )
+
     def set_night_mow(self, sn: str, on: bool) -> Any:
         return self.set_bool_setting(sn, "nightMowSwitch", on)
+
+    @staticmethod
+    def _partition_plan_hex(day: int, enabled: bool, periods: list[dict]) -> str:
+        """Per-day plan encoded for the ``s:mower`` device command.
+
+        Byte layout (verified live over 3 captures incl. an OFF day)::
+
+            01 <day> <open> <n_periods> [ <start> <end> <n_zones> <zone_id>* ]*
+
+        every byte in hex; start/end are 15-minute slots from 00:00. The leading
+        ``01`` = one day per command; an empty zone list (n_zones=0) => all zones.
+        An OFF day is simply ``01 <day> 00 00``.
+        """
+        b = [1, int(day), 1 if enabled else 0, len(periods)]
+        for p in periods:
+            ids = [int(z) for z in (p.get("partition_ids") or [])]
+            b += [int(p["start_time"]), int(p["end_time"]), len(ids), *ids]
+        return "".join("%02X" % (x & 0xFF) for x in b)
 
     def set_day_schedule(
         self, sn: str, vehicle_type: Any, day: int, enabled: bool, periods: list[dict]
@@ -426,9 +492,15 @@ class NavimowCloudClient:
 
         ``day`` is the Navimow weekday number (1=Sun .. 7=Sat). ``periods`` is a
         list of ``{start_min, end_min, zone_ids}`` (minutes from 00:00; empty
-        zone_ids => all zones). Writes via save-set-data updateDeviceSetting:
-        ``data={partitionPlan<day-1>: {day, open, period:[{start_time, end_time,
-        partition_ids}]}}`` + ``operation_type="iot_set"``.
+        zone_ids => all zones). Mirrors the app: first an immediate device
+        command (``cmdCode="s:mower"`` on ``/vehicle/set/send`` -- the proven
+        control endpoint the mow/dock commands use -- carrying the plan bytes
+        from :meth:`_partition_plan_hex` as a JSON *string*), then the cloud
+        persist (``save-set-data`` + ``operation_type="iot_set"`` with
+        ``{partitionPlan<day-1>: {day, open, period:[...]}}``). Robot first:
+        while the mower is running the device command is refused (same as the
+        app), which correctly aborts before the cloud write. Returns the cloud
+        result.
         """
         plan_periods = [
             {
@@ -438,13 +510,26 @@ class NavimowCloudClient:
             }
             for p in periods
         ]
+        key = f"partitionPlan{int(day) - 1}"
+        # 1) Immediate command to the robot -- /vehicle/set/send (the proven
+        #    s:mower control endpoint), data as a JSON *string*, as the app sends.
+        hex_plan = self._partition_plan_hex(day, enabled, plan_periods)
+        self.call(
+            "/vehicle/set/send",
+            {
+                "vehicle_sn": sn,
+                "cmdCode": "s:mower",
+                "data": json.dumps({key: hex_plan}, separators=(",", ":")),
+            },
+        )
+        # 2) Persist to the cloud (iot_set) -- the copy the app reads back.
         entry = {"day": int(day), "open": 1 if enabled else 0, "period": plan_periods}
         return self.call(
             "/vehicle/set/save-set-data",
             {
                 "vehicle_sn": sn,
                 "vehicle_type": str(vehicle_type),
-                "data": {f"partitionPlan{int(day) - 1}": entry},
+                "data": {key: entry},
                 "operation_type": "iot_set",
             },
         )

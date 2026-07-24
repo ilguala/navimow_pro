@@ -12,9 +12,12 @@ but unavailable (see README).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from homeassistant.components.select import SelectEntity
+from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -27,11 +30,57 @@ _LOGGER = logging.getLogger(__name__)
 ALL_ZONES = "All zones"
 
 
+@dataclass(frozen=True, kw_only=True)
+class NavimowSelectDescription(SelectEntityDescription):
+    """A multi-value MowerSettingBean setting (numeric on the wire)."""
+
+    value_fn: Callable[[dict], int | None]
+    write_key: str
+    # option string -> numeric value written (also defines the option list).
+    value_map: dict[str, int]
+    # device (s:mower) value encoding: True => JSON number, False => zero-padded
+    # 2-char string ("00"/"01"). Cloud (iot_set) is always the bare number.
+    robot_numeric: bool = False
+
+
+# Settings selects (written via save-set-data + iot_set, bare integer value).
+# Feature-detected: created only when the robot reports the key.
+SETTING_SELECTS: tuple[NavimowSelectDescription, ...] = (
+    NavimowSelectDescription(
+        key="night_light_level",
+        translation_key="night_light_level",
+        icon="mdi:brightness-6",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda s: s.get("night_light_level"),
+        write_key="nightLightLevel",
+        value_map={"dim": 0, "very_dim": 1},  # Tenue / Molto tenue
+        robot_numeric=False,  # robot takes "00"/"01"
+    ),
+    NavimowSelectDescription(
+        key="weather_sensitivity",  # rain-forecast sensitivity
+        translation_key="weather_sensitivity",
+        icon="mdi:weather-partly-rainy",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda s: s.get("weather_sensitivity"),
+        write_key="weatherSensitivity",
+        value_map={"drizzle": 0, "light": 1, "moderate": 2},
+        robot_numeric=True,  # robot takes the bare number
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: NavimowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([NavimowZoneSelect(coordinator)])
+    settings = (coordinator.data or {}).get("settings") or {}
+    entities: list[SelectEntity] = [NavimowZoneSelect(coordinator)]
+    entities += [
+        NavimowSettingSelect(coordinator, desc)
+        for desc in SETTING_SELECTS
+        if desc.value_fn(settings) is not None
+    ]
+    async_add_entities(entities)
 
 
 class NavimowZoneSelect(NavimowEntity, SelectEntity):
@@ -88,3 +137,43 @@ class NavimowZoneSelect(NavimowEntity, SelectEntity):
             region_ids = [match["id"]]
         self.coordinator.selected_zone_ids = region_ids
         self.async_write_ha_state()
+
+
+class NavimowSettingSelect(NavimowEntity, SelectEntity):
+    """A multi-value cloud setting (e.g. night-light brightness)."""
+
+    entity_description: NavimowSelectDescription
+
+    def __init__(
+        self, coordinator: NavimowCoordinator, description: NavimowSelectDescription
+    ) -> None:
+        super().__init__(coordinator, description.key)
+        self.entity_description = description
+        self._attr_options = list(description.value_map)
+        self._rev = {v: k for k, v in description.value_map.items()}
+
+    @property
+    def current_option(self) -> str | None:
+        val = self.entity_description.value_fn(self.data.get("settings") or {})
+        return self._rev.get(val)
+
+    async def async_select_option(self, option: str) -> None:
+        num = self.entity_description.value_map[option]
+        key = self.entity_description.write_key
+        # 1) device command first -- makes the robot apply it (the cloud copy
+        #    alone reverts). Robot value: bare number, or a zero-padded 2-char
+        #    string per the captured per-key encoding. Refused while mowing,
+        #    aborts before the cloud write.
+        robot_val = num if self.entity_description.robot_numeric else f"{num:02d}"
+        await self.coordinator.async_send(
+            self.coordinator.client.send_setting_device,
+            self._sn,
+            {key: robot_val},
+        )
+        # 2) cloud persist (save-set-data + iot_set, bare integer)
+        await self.coordinator.async_send(
+            self.coordinator.client.save_setting_iot,
+            self._sn,
+            self.coordinator.vehicle_type,
+            {key: num},
+        )

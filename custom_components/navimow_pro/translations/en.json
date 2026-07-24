@@ -140,11 +140,79 @@
       },
       "power_saving": {
         "name": "Power saving"
+      },
+      "child_lock": {
+        "name": "Child lock"
+      },
+      "lift_alarm": {
+        "name": "Lift alarm"
+      },
+      "mowing_cycle": {
+        "name": "Cyclic mowing"
+      },
+      "frost_delay": {
+        "name": "Frost delay"
+      },
+      "snow_delay": {
+        "name": "Snow delay"
+      },
+      "storm_delay": {
+        "name": "Strong wind delay"
+      },
+      "high_temp_delay": {
+        "name": "High-temperature delay"
+      },
+      "efls": {
+        "name": "Camera positioning (EFLS)"
+      },
+      "obstacle_avoidance": {
+        "name": "Obstacle avoidance"
+      },
+      "traction_control": {
+        "name": "Traction control"
+      },
+      "animal_protection": {
+        "name": "Animal-friendly"
+      },
+      "night_light": {
+        "name": "Night light"
+      },
+      "weather_rain": {
+        "name": "Rain forecast"
+      },
+      "rain_delay_mode": {
+        "name": "Delay on rain"
       }
     },
     "select": {
       "zone": {
         "name": "Mow zone"
+      },
+      "night_light_level": {
+        "name": "Night light brightness",
+        "state": {
+          "dim": "Dim",
+          "very_dim": "Very dim"
+        }
+      },
+      "weather_sensitivity": {
+        "name": "Rain sensitivity",
+        "state": {
+          "drizzle": "Drizzle",
+          "light": "Light rain",
+          "moderate": "Moderate"
+        }
+      }
+    },
+    "number": {
+      "return_battery_level": {
+        "name": "Return-to-dock battery"
+      },
+      "charging_limit": {
+        "name": "Charging limit"
+      },
+      "rain_delay_time": {
+        "name": "Rain delay time"
       }
     },
     "camera": {

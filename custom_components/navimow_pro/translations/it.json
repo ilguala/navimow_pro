@@ -140,11 +140,79 @@
       },
       "power_saving": {
         "name": "Risparmio energetico"
+      },
+      "child_lock": {
+        "name": "Blocco bambini"
+      },
+      "lift_alarm": {
+        "name": "Allarme sollevamento"
+      },
+      "mowing_cycle": {
+        "name": "Falciatura ciclica"
+      },
+      "frost_delay": {
+        "name": "Ritardo gelo"
+      },
+      "snow_delay": {
+        "name": "Ritardo neve"
+      },
+      "storm_delay": {
+        "name": "Ritardo vento forte"
+      },
+      "high_temp_delay": {
+        "name": "Ritardo clima caldo"
+      },
+      "efls": {
+        "name": "Posizionamento telecamera (EFLS)"
+      },
+      "obstacle_avoidance": {
+        "name": "Evitamento ostacoli"
+      },
+      "traction_control": {
+        "name": "Controllo trazione"
+      },
+      "animal_protection": {
+        "name": "Amico degli animali"
+      },
+      "night_light": {
+        "name": "Luce notturna"
+      },
+      "weather_rain": {
+        "name": "Previsioni pioggia"
+      },
+      "rain_delay_mode": {
+        "name": "Ritarda con pioggia"
       }
     },
     "select": {
       "zone": {
         "name": "Zona di taglio"
+      },
+      "night_light_level": {
+        "name": "Luminosità luce notturna",
+        "state": {
+          "dim": "Tenue",
+          "very_dim": "Molto tenue"
+        }
+      },
+      "weather_sensitivity": {
+        "name": "Sensibilità pioggia",
+        "state": {
+          "drizzle": "Pioggerella",
+          "light": "Pioggia leggera",
+          "moderate": "Moderata"
+        }
+      }
+    },
+    "number": {
+      "return_battery_level": {
+        "name": "Soglia rientro batteria"
+      },
+      "charging_limit": {
+        "name": "Limite di carica"
+      },
+      "rain_delay_time": {
+        "name": "Tempo di ritardo pioggia"
       }
     },
     "camera": {

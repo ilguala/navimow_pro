@@ -17,3 +17,6 @@ Thumbs.db
 # Local secrets / runtime (never publish)
 secrets.yaml
 *.env
+
+# Deploy artifacts (self-extracting installers -- never publish)
+install_navimow_pro_*.sh
