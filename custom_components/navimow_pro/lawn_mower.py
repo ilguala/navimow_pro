@@ -19,9 +19,9 @@ from .const import (
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
     DOMAIN,
-    MOW_SETUP_RESTART,
     STATE_PAUSED,
     encode_partition_ids,
+    mow_setup,
 )
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
@@ -80,11 +80,16 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
                 "integration Options (id:name,...) so a start command can be sent."
             )
         available_ids = [z["id"] for z in zones]
-        sel = self.coordinator.selected_zone_ids or []
-        region_ids = [i for i in sel if i in available_ids] or available_ids
+        sel = [i for i in (self.coordinator.selected_zone_ids or []) if i in available_ids]
+        region_ids = sel or available_ids
         partition_ids = encode_partition_ids(region_ids)
+        # A picked zone is a preference to honour; "all zones" is not, so let the
+        # robot choose its own route there.
         await self.coordinator.async_send(
-            client.mow_zones, sn, partition_ids, MOW_SETUP_RESTART
+            client.mow_zones,
+            sn,
+            partition_ids,
+            mow_setup(reset=True, ordered=bool(sel)),
         )
 
     async def async_pause(self) -> None:

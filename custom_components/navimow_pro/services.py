@@ -3,8 +3,11 @@
 - ``navimow_pro.set_schedule`` writes one weekday's plan (enabled + one or more
   time periods, each optionally restricted to zones) via the proven
   save-set-data format.
-- ``navimow_pro.mow`` starts mowing now: chosen zones (empty = all) and a
-  ``reset`` flag (True = riparti da zero / clear progress, False = continua).
+- ``navimow_pro.mow`` starts mowing now: chosen zones and a ``reset`` flag
+  (True = riparti da zero / clear progress, False = continua). Listing zones
+  explicitly also fixes the ORDER they are mowed in (like the app's "Personalizza
+  la sequenza di falciatura"); omitting them means all zones with the robot
+  choosing its own route.
 
 These back the graphical cards (and automations).
 """
@@ -18,9 +21,8 @@ from homeassistant.helpers import device_registry as dr
 
 from .const import (
     DOMAIN,
-    MOW_SETUP_CONTINUE,
-    MOW_SETUP_RESTART,
     encode_partition_ids,
+    mow_setup,
 )
 
 SERVICE_SET_SCHEDULE = "set_schedule"
@@ -129,6 +131,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def _mow(call: ServiceCall) -> None:
         coordinator = _resolve_coordinator(call)
         zones = [int(z) for z in call.data.get("zones") or []]
+        # An explicit list means "mow these, in this order"; omitting it means
+        # "all zones, no preference" -> let the robot route itself (see mow_setup).
+        ordered = bool(zones)
         if not zones:
             # All available zones (from the current snapshot).
             zones = [
@@ -142,8 +147,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "or pass explicit zone ids."
             )
         partition_ids = encode_partition_ids(zones)
-        # partitionSetup carries the restart/continue mode (proven live).
-        partition_setup = MOW_SETUP_RESTART if call.data["reset"] else MOW_SETUP_CONTINUE
+        partition_setup = mow_setup(reset=call.data["reset"], ordered=ordered)
         try:
             await coordinator.async_send(
                 coordinator.client.mow_zones,

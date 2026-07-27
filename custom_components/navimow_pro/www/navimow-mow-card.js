@@ -2,9 +2,14 @@
  * Navimow (Private) — "Mow now" card.
  *
  * The card itself is just a "Mow" button; clicking it opens a popup (a modal
- * dialog) where you pick a zone (or all) and choose restart-vs-continue
- * ("riparti da zero"), then confirm with Start. The modal doubles as the
- * confirm step, so a stray tap never sends the robot out.
+ * dialog) where you pick the zones and choose restart-vs-continue ("riparti da
+ * zero"), then confirm with Start. The modal doubles as the confirm step, so a
+ * stray tap never sends the robot out.
+ *
+ * Zones are picked as an ORDERED sequence: tapping them numbers the chips 1, 2,
+ * 3... and the robot mows them in that order (the app's "Personalizza la
+ * sequenza di falciatura"). Tapping a chip again removes it and renumbers the
+ * rest. Selecting none means "all zones", letting the robot route itself.
  *
  * Zero external dependencies (vanilla custom element + a self-built overlay
  * styled with HA CSS variables). Reads the available zones from the schedule
@@ -17,6 +22,7 @@ const STRINGS = {
     button: "Mow",
     allZones: "All zones",
     zone: "Zone",
+    seqHint: "Tap zones in the order you want them mowed. None = all zones, robot picks the route.",
     reset: "Restart from scratch",
     resetHint: "On: re-mow the whole zone. Off: continue only the uncut area.",
     start: "Start",
@@ -32,6 +38,7 @@ const STRINGS = {
     button: "Taglia",
     allZones: "Tutte le zone",
     zone: "Zona",
+    seqHint: "Tocca le zone nell'ordine di taglio desiderato. Nessuna = tutte, ordine automatico.",
     reset: "Riparti da zero",
     resetHint: "On: ritaglia tutta la zona. Off: continua solo la parte non tagliata.",
     start: "Avvia",
@@ -54,7 +61,7 @@ class NavimowMowCard extends HTMLElement {
     this._config = null;
     this._zones = [];
     this._sig = null;
-    this._sel = ALL;
+    this._seq = []; // ordered zone ids; empty = all zones, automatic order
     this._reset = true;
     this._open = false;
     this._status = null;
@@ -97,7 +104,8 @@ class NavimowMowCard extends HTMLElement {
     if (!this._rendered || sig !== this._sig) {
       this._sig = sig;
       this._zones = zones;
-      if (this._sel !== ALL && !zones.some((z) => z.id === this._sel)) this._sel = ALL;
+      // Drop picks for zones that no longer exist (keeps the order of the rest).
+      this._seq = this._seq.filter((id) => zones.some((z) => z.id === id));
       this._render();
     }
   }
@@ -147,17 +155,18 @@ class NavimowMowCard extends HTMLElement {
   _overlay() {
     const t = this._t();
     const chips = [
-      `<button class="chip ${this._sel === ALL ? "active" : ""}" data-act="zone" data-id="${ALL}">${this._esc(
+      `<button class="chip ${this._seq.length ? "" : "active"}" data-act="zone" data-id="${ALL}">${this._esc(
         t.allZones
       )}</button>`,
     ]
       .concat(
-        this._zones.map(
-          (z) =>
-            `<button class="chip ${this._sel === z.id ? "active" : ""}" data-act="zone" data-id="${z.id}">${this._esc(
-              z.name || t.zone + " " + z.id
-            )}</button>`
-        )
+        this._zones.map((z) => {
+          const pos = this._seq.indexOf(z.id);
+          const badge = pos < 0 ? "" : `<span class="ord">${pos + 1}</span>`;
+          return `<button class="chip ${pos < 0 ? "" : "active"}" data-act="zone" data-id="${z.id}">${badge}${this._esc(
+            z.name || t.zone + " " + z.id
+          )}</button>`;
+        })
       )
       .join("");
     return `
@@ -165,6 +174,7 @@ class NavimowMowCard extends HTMLElement {
         <div class="dialog" role="dialog" aria-modal="true">
           <div class="dtitle">${this._esc(t.title)}</div>
           <div class="zones">${chips}</div>
+          <div class="seq-hint">${this._esc(t.seqHint)}</div>
           <div class="reset-row">
             <ha-switch data-act="reset" ${this._reset ? "checked" : ""}></ha-switch>
             <div class="reset-txt">
@@ -196,8 +206,15 @@ class NavimowMowCard extends HTMLElement {
       });
     root.querySelectorAll("[data-act='zone']").forEach((el) =>
       el.addEventListener("click", (e) => {
-        const id = e.currentTarget.dataset.id;
-        this._sel = id === ALL ? ALL : Number(id);
+        const raw = e.currentTarget.dataset.id;
+        if (raw === ALL) {
+          this._seq = []; // all zones, robot's own order
+        } else {
+          const id = Number(raw);
+          const at = this._seq.indexOf(id);
+          if (at < 0) this._seq.push(id);
+          else this._seq.splice(at, 1); // tap again to remove (rest renumbers)
+        }
         this._render();
       })
     );
@@ -225,7 +242,9 @@ class NavimowMowCard extends HTMLElement {
     this._status = { kind: "saving", text: t.starting };
     this._render();
     const data = { reset: this._reset };
-    if (this._sel !== ALL) data.zones = [this._sel];
+    // An explicit list also fixes the mowing order; omitting it = all zones,
+    // robot's own route (see the mow service).
+    if (this._seq.length) data.zones = this._seq.slice();
     const dev = this._deviceId();
     if (dev) data.device_id = dev;
     try {
@@ -277,13 +296,20 @@ class NavimowMowCard extends HTMLElement {
         border-radius: 14px; padding: 18px; box-shadow: 0 8px 32px rgba(0,0,0,0.35);
       }
       .dtitle { font-size: 1.15rem; font-weight: 600; margin-bottom: 14px; }
-      .zones { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .zones { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
       .chip {
+        display: inline-flex; align-items: center; gap: 6px;
         border: 1px solid var(--primary-color, #03a9f4);
         background: transparent; color: var(--primary-color, #03a9f4);
         border-radius: 16px; padding: 6px 14px; font-size: 0.9rem; cursor: pointer;
       }
       .chip.active { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+      .ord {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 18px; height: 18px; border-radius: 50%; font-size: 0.72rem; font-weight: 700;
+        background: var(--text-primary-color, #fff); color: var(--primary-color, #03a9f4);
+      }
+      .seq-hint { font-size: 0.78rem; color: var(--secondary-text-color); margin-bottom: 14px; }
       .reset-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
       ha-switch { flex: none; }
       .reset-name { font-weight: 500; }

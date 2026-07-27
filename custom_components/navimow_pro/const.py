@@ -78,14 +78,32 @@ DOCKED_STATES: Final = {STATE_IDLE_DOCKED, STATE_IDLE_DOCKED_POST}
 ACTIVE_STATES: Final = {STATE_MOWING, STATE_RETURNING}
 
 
-# --- Mow "restart vs continue" (partitionSetup, proven via NSKPTLOG diff) ------
-# The app's "Cancella i progressi e riparti da zero" checkbox is encoded in the
-# s:mower command's `partitionSetup` field (NOT a separate flag): 34 = restart
-# from scratch (clear progress), 18 = continue only the uncut area. Verified live
-# by diffing the plaintext command with the box OFF (18) vs ON (34), same zone.
-# partitionSetup is zone-independent (partitionIds carries the zone selection).
-MOW_SETUP_RESTART: Final = 34  # "riparti da zero" (clear progress)
-MOW_SETUP_CONTINUE: Final = 18  # "continua" (keep progress, mow only uncut)
+# --- Mow options (`partitionSetup`) -- two hex nibbles, 0xAB ------------------
+# Captured live by diffing the plaintext s:mower command across three runs with
+# each variable isolated (app's "riparti da zero" checkbox and "Personalizza la
+# sequenza di falciatura" toggle):
+#
+#   A (high) = 1 continue (mow only the uncut area) | 2 restart (clear progress)
+#   B (low)  = 1 automatic order (the robot picks the route)
+#              2 custom sequence (mow the zones in the order given by partitionIds)
+#
+# So the zone ORDER in partitionIds is only honoured when B == 2; with B == 1 the
+# robot ignores it and optimises its own route. (0x21 is the one combination not
+# captured directly -- deduced from the scheme.)
+MOW_SETUP_CONTINUE_AUTO: Final = 0x11  # 17 - continue, robot's own order
+MOW_SETUP_CONTINUE: Final = 0x12  # 18 - continue, honour our zone order
+MOW_SETUP_RESTART_AUTO: Final = 0x21  # 33 - restart, robot's own order (deduced)
+MOW_SETUP_RESTART: Final = 0x22  # 34 - restart, honour our zone order
+
+
+def mow_setup(*, reset: bool, ordered: bool) -> int:
+    """`partitionSetup` for a mow command: restart-vs-continue + order mode.
+
+    ``ordered=False`` lets the robot route itself (use it when the caller has no
+    zone preference, e.g. "all zones"); ``ordered=True`` makes it follow the
+    partitionIds sequence.
+    """
+    return (0x20 if reset else 0x10) | (0x02 if ordered else 0x01)
 
 
 # --- Zone / partition encoding (proven; see Navimow_PrivateAPI_Catalogo §3.2)
@@ -98,17 +116,6 @@ def encode_partition_ids(region_ids: list[int]) -> str:
     for rid in region_ids:
         out.append(f"{rid & 0xFF:02x}{(rid >> 8) & 0xFF:02x}")
     return "".join(out)
-
-
-def partition_setup_mask(available_region_ids: list[int]) -> int:
-    """Bitmask of *available* map regions: (1<<id) OR'd together.
-
-    Proven: available regions {1,5} -> (1<<1)|(1<<5) = 34.
-    """
-    mask = 0
-    for rid in available_region_ids:
-        mask |= 1 << rid
-    return mask
 
 
 def decode_partition_id_list(be_hex: str) -> list[int]:

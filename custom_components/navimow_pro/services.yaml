@@ -46,7 +46,7 @@ set_schedule:
 mow:
   name: Mow now
   description: >-
-    Start mowing immediately: the chosen zones (empty = all) with a
+    Start mowing immediately: the chosen zones, in the order given, with a
     restart-vs-continue choice.
   fields:
     device_id:
@@ -59,7 +59,9 @@ mow:
     zones:
       name: Zones
       description: >-
-        Region ids to mow (e.g. [1] or [1,5]). Leave empty to mow all zones.
+        Region ids to mow, in the order they should be mowed (e.g. [5,1] mows
+        region 5 first). Leave empty to mow all zones and let the mower choose
+        its own route.
       required: false
       example: "[1]"
       selector:

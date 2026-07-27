@@ -50,7 +50,6 @@ from .const import (
     VEHICLE_STATE_TO_ACTIVITY,
     decode_partition_id_list,
     encode_partition_ids,
-    partition_setup_mask,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -848,8 +847,6 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             if current_ids
             else "All"
         )
-        available_ids = [z["id"] for z in zones]
-        partition_setup = partition_setup_mask(available_ids) if available_ids else None
         map_geom = self._map_geometry or {}
 
         # Coverage (per-zone %) + reconstructed mowed trail (accumulated position).
@@ -966,7 +963,6 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "zones": zones,
             "current_zone": current_zone,
             "current_zone_ids": current_ids,
-            "available_partition_setup": partition_setup,
             # weekly mowing schedule (days -> periods -> zones)
             "schedule": _parse_schedule(set_list, zone_names),
             # connectivity
