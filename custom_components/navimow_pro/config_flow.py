@@ -93,6 +93,26 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         self._reauth_entry: ConfigEntry | None = None
 
     # ---------------------------------------------------------------- helpers
+    def _shared_device_id(self, email: str) -> str | None:
+        """The device identity already bound for this account, if any.
+
+        The cloud binds ONE device identity per account: an entry logging in with
+        its own fresh identity kicks any other entry of the same account out
+        (reported live by a user with two mowers on one account). So every entry
+        of an account must present the SAME identity.
+
+        ``min()`` makes the choice deterministic, so entries created before this
+        fix converge onto one identity instead of ping-ponging between two.
+        """
+        wanted = (email or "").strip().lower()
+        ids = {
+            str(entry.data[CONF_DEVICE_ID])
+            for entry in self._async_current_entries()
+            if entry.data.get(CONF_DEVICE_ID)
+            and str(entry.data.get(CONF_EMAIL, "")).strip().lower() == wanted
+        }
+        return min(ids) if ids else None
+
     async def _authenticate(
         self, email: str, password: str, region: str | None = None
     ) -> list[dict]:
@@ -103,7 +123,10 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         (unless the user pinned one), then probe the region's mower hosts and keep
         the first that answers -- persisted afterwards so runtime never guesses.
         """
-        device_id = self._device_id or uuid.uuid4().hex
+        # An account's entries must all present the same device identity, so a
+        # shared one wins over this flow's own (that is what makes two mowers on
+        # one account coexist, and heals entries created before the fix).
+        device_id = self._shared_device_id(email) or self._device_id or uuid.uuid4().hex
         self._device_id = device_id
         client = NavimowCloudClient(device_id=device_id, language=DEFAULT_LANGUAGE)
 

@@ -133,20 +133,23 @@ mower**:
   If the account lists several, a picker appears; mowers you have already added
   are hidden, so just pick the next one (a single remaining mower is added
   automatically).
-- **Shared mowers** (an account that owns none — e.g. the recommended shared
-  account) — use the manual serial step once per mower.
+- **Shared mowers** — once you have **accepted the share invitation**, the mowers
+  are listed just like owned ones, so the picker above applies. The manual serial
+  step is the fallback for when nothing is listed (typically an invitation that
+  has not been accepted yet).
 
 Each mower becomes its own Home Assistant device with its own entities, cards
 and (persisted) map/trail. The `navimow_pro.mow` / `navimow_pro.set_schedule`
 services take a `device_id`, so they always target the right mower (required
 once more than one is configured).
 
-> **Note — untested with 2+ mowers on one account.** The single-mower path is
-> well tested; multiple mowers on the **same** account is supported by design
-> but not yet verified live. Each entry logs in with its own device id
-> (independent sessions); if the cloud turns out to enforce one session per
-> account, the entries could contend for the token. If you hit repeated re-auth
-> prompts with several mowers on one account, please open an issue.
+> **Note — several mowers on one account.** The cloud binds **one device identity
+> per account**, so two entries logging in with their own identity used to kick
+> each other out (reported live, and fixed in 0.2.2): entries belonging to the
+> same account now share that identity, which keeps them all signed in. Entries
+> created before 0.2.2 converge onto a shared identity the next time you
+> re-authenticate one of them. If you still see repeated re-auth prompts with
+> several mowers on one account, please open an issue.
 
 ---
 

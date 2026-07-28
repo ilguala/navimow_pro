@@ -62,6 +62,20 @@ class NavimowSwitchDescription(SwitchEntityDescription):
 
 
 SWITCHES: tuple[NavimowSwitchDescription, ...] = (
+    # Master on/off for the weekly mowing plan (the app's schedule toggle). Off
+    # keeps the plan stored but stops it running. Same key and string encoding on
+    # both channels (captured live).
+    NavimowSwitchDescription(
+        key="schedule_enabled",
+        translation_key="schedule_enabled",
+        icon="mdi:calendar-check",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda s: s.get("schedule_enabled"),
+        write_key="startPlan",
+        iot=True,  # cloud string "1"/"0"
+        robot_numeric=False,  # robot also string "1"/"0"
+        enabled_default=True,
+    ),
     NavimowSwitchDescription(
         key="night_mow",
         translation_key="night_mow",

@@ -127,6 +127,9 @@
       }
     },
     "switch": {
+      "schedule_enabled": {
+        "name": "Mowing schedule enabled"
+      },
       "night_mow": {
         "name": "Night mowing"
       },

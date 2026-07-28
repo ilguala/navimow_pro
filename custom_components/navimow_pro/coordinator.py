@@ -474,6 +474,10 @@ def _compute_next_mow(set_list: Any, now: Any) -> str | None:
     open day+start relative to ``now`` (searching a full week including today),
     or ``None`` if nothing is scheduled.
     """
+    # The weekly plan has a master on/off (startPlan): with it off the plan is
+    # still stored but never runs, so promising a next mow would be misleading.
+    if _as_bool(_find(set_list, "startPlan", "start_plan")) is False:
+        return None
     plan = _schedule_source(set_list)
     if not isinstance(plan, list):
         return None
@@ -886,6 +890,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         obstacle_avoid = _as_bool(_find(set_list, "cptSwitch", "cpt_switch"))
         traction = _as_bool(_find(set_list, "tractionControl", "traction_control"))
         night_light_level = _as_int(_find(set_list, "nightLightLevel", "night_light_level"))
+        # Master on/off for the weekly plan (captured live: the bean's startPlan
+        # flips 1 -> 0 with the app's schedule toggle; written as a string).
+        schedule_enabled = _as_bool(_find(set_list, "startPlan", "start_plan"))
         # rain / weather-forecast zone (captured live, distinct from the physical
         # rainSensor/rainDetectionSwitch above): weatherSwitch=master on/off,
         # weatherSensitivity=drizzle 0/light 1/moderate 2, delayedPileSwitch=
@@ -923,6 +930,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "obstacle_avoid": obstacle_avoid,
             "traction": traction,
             "night_light_level": night_light_level,
+            "schedule_enabled": schedule_enabled,
             "cut_height": _as_int(_find(set_list, "height")),
             # set-list reports these percentages as DECIMAL (10 / 100). Only the
             # app's internal bean and the device (s:mower) write use hex -- the

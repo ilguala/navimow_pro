@@ -127,6 +127,9 @@
       }
     },
     "switch": {
+      "schedule_enabled": {
+        "name": "Programma di falciatura attivo"
+      },
       "night_mow": {
         "name": "Falciatura notturna"
       },
