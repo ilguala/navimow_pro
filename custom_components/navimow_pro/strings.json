@@ -35,6 +35,7 @@
       }
     },
     "error": {
+      "account_not_found": "That account was not found on any Navimow server. Check the address, or pick your server region manually below.",
       "invalid_auth": "Invalid email or password.",
       "cannot_connect": "Could not reach the Navimow cloud. Try again.",
       "no_vehicles": "No mower is associated with this account.",

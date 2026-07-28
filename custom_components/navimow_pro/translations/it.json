@@ -35,6 +35,7 @@
       }
     },
     "error": {
+      "account_not_found": "Questo account non risulta su nessun server Navimow. Controlla l'indirizzo, oppure scegli la regione del server qui sotto.",
       "invalid_auth": "Email o password non validi.",
       "cannot_connect": "Impossibile raggiungere il cloud Navimow. Riprova.",
       "no_vehicles": "Nessun robot associato a questo account.",

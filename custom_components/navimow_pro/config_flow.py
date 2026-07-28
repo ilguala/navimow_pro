@@ -35,7 +35,13 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .api import NavimowCloudClient, NavimowError, PassportAuthError, PassportError
+from .api import (
+    NavimowCloudClient,
+    NavimowError,
+    PassportAuthError,
+    PassportError,
+    RESULT_ACCOUNT_NOT_EXISTS,
+)
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_DEVICE_ID,
@@ -184,11 +190,20 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._vehicles = await self._authenticate(
                     self._email, user_input[CONF_PASSWORD], self._region
                 )
-            except PassportAuthError:
-                errors["base"] = "invalid_auth"
-            except PassportError:
+            except PassportAuthError as err:
+                # Log the server's own code: "invalid_auth" alone leaves a user
+                # with nothing to report when the real cause is something else.
+                _LOGGER.warning("Navimow login refused: %s", err)
+                errors["base"] = (
+                    "account_not_found"
+                    if err.code == RESULT_ACCOUNT_NOT_EXISTS
+                    else "invalid_auth"
+                )
+            except PassportError as err:
+                _LOGGER.warning("Navimow passport error: %s", err)
                 errors["base"] = "cannot_connect"
-            except NavimowError:
+            except NavimowError as err:
+                _LOGGER.warning("Navimow cloud error: %s", err)
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001 - surface anything unexpected safely
                 _LOGGER.exception("Unexpected error during Navimow login")
@@ -342,9 +357,11 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._vehicles = await self._authenticate(
                     email, user_input[CONF_PASSWORD], self._region
                 )
-            except PassportAuthError:
+            except PassportAuthError as err:
+                _LOGGER.warning("Navimow reauth refused: %s", err)
                 errors["base"] = "invalid_auth"
-            except (PassportError, NavimowError):
+            except (PassportError, NavimowError) as err:
+                _LOGGER.warning("Navimow reauth error: %s", err)
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Unexpected error during Navimow reauth")

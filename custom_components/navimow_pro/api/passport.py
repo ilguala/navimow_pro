@@ -190,12 +190,13 @@ def login(username: str, password: str, region: str | None = None) -> Tokens:
     account first (see :func:`lookup_region`). The region's hosts are tried in
     order so a single dead endpoint does not break login.
     """
+    discovered = False
     if not region:
         region = lookup_region(username) or DEFAULT_REGION
-    hosts = passport_hosts(region)
+        discovered = True
     params = {"username": username, "password": password, "device": DEVICE}
     last: PassportAuthError | None = None
-    for host in hosts:
+    for host in passport_hosts(region):
         j = _post("/v3/user/login", params, host)
         code = str(j.get("resultCode"))
         if code == _RESULT_OK:
@@ -207,9 +208,20 @@ def login(username: str, password: str, region: str | None = None) -> Tokens:
             _LOGGER.debug("passport login ok on %s: %s", host, tokens.redacted())
             return tokens
         last = PassportAuthError(code, str(j.get("resultDesc", "")))
+        _LOGGER.warning("passport login refused by %s: %s %s", host, code, last.desc)
         # Only "not here" is worth retrying elsewhere; bad credentials are final.
         if code != RESULT_ACCOUNT_NOT_EXISTS:
             raise last
+
+    # The account is on none of that region's servers. A pinned region can simply
+    # be the wrong guess, so fall back to asking every server who owns it.
+    if not discovered:
+        found = lookup_region(username)
+        if found and canonical_region(found) != canonical_region(region):
+            _LOGGER.warning(
+                "account is not on region %s; retrying on %s", region, found
+            )
+            return login(username, password, found)
     raise last or PassportAuthError("unknown", "login failed")
 
 

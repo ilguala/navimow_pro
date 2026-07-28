@@ -6,7 +6,12 @@ from .client import (
     NavimowCloudClient,
     NavimowError,
 )
-from .passport import PassportAuthError, PassportError, Tokens
+from .passport import (
+    RESULT_ACCOUNT_NOT_EXISTS,
+    PassportAuthError,
+    PassportError,
+    Tokens,
+)
 
 __all__ = [
     "NavimowAuthError",
@@ -14,5 +19,6 @@ __all__ = [
     "NavimowError",
     "PassportAuthError",
     "PassportError",
+    "RESULT_ACCOUNT_NOT_EXISTS",
     "Tokens",
 ]
