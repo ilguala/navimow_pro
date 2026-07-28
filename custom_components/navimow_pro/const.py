@@ -14,6 +14,7 @@ CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_UID: Final = "uid"
 CONF_DEVICE_ID: Final = "device_id"
 CONF_REGION: Final = "region"
+CONF_MOWER_HOST: Final = "mower_host"  # resolved at setup, so runtime is deterministic
 CONF_LANGUAGE: Final = "language"
 CONF_VEHICLE_SN: Final = "vehicle_sn"
 CONF_VEHICLE_TYPE: Final = "vehicle_type"
@@ -24,6 +25,84 @@ CONF_MODEL: Final = "model"
 OPT_ZONES: Final = "zones"  # user-supplied "id:name,id:name" mapping (fallback zone list)
 
 DEFAULT_LANGUAGE: Final = "en"
+
+# --- Server regions -----------------------------------------------------------
+# The account lives on ONE regional server; talking to the wrong one fails at
+# login ("account not exists"), so the region must be resolved, not assumed.
+# Enumerated 2026-07-28 by DNS across ninebot.com / willand.com / navimow.com and
+# verified functionally (each host answers a signed /v3/region call):
+#
+#   us   Americas        fra  Europe (alias "eu")
+#   sg   Asia-Pacific    bj   mainland China
+#       (alias "sea")
+#
+# `ninebot.com` carries all four; `willand.com` is the older domain (it has no
+# `us`) but is the one proven in production for `fra`, so it stays first there.
+DEFAULT_REGION: Final = "fra"
+REGION_AUTO: Final = "auto"  # config-flow choice: detect from the account
+
+# Codes the backend also answers to, mapped onto the primary code.
+_REGION_ALIASES: Final = {"eu": "fra", "sea": "sg"}
+
+PASSPORT_HOSTS: Final = {
+    "fra": ("api-passport-fra.willand.com", "api-passport-fra.ninebot.com"),
+    "sg": ("api-passport-sg.willand.com", "api-passport-sg.ninebot.com"),
+    "us": ("api-passport-us.ninebot.com",),
+    "bj": ("api-passport-bj.willand.com", "api-passport-bj.ninebot.com"),
+}
+
+# Mower-cloud candidates per region, tried in order at setup; the first one that
+# answers is persisted (CONF_MOWER_HOST). NB: no `navimow-us*` host exists under
+# any of the three domains, so a US account falls back to trying them all -- if
+# that fails the user can set the host by hand (see the config flow).
+MOWER_HOSTS: Final = {
+    "fra": ("navimow-fra.ninebot.com", "navimow-fra.willand.com"),
+    "sg": ("navimow-sg.willand.com",),
+    "bj": ("navimow-bj.ninebot.com", "navimow-bj.willand.com"),
+    "us": (),  # unknown -- see _ALL_MOWER_HOSTS fallback
+}
+
+REGIONS: Final = tuple(PASSPORT_HOSTS)
+
+_ALL_MOWER_HOSTS: Final = tuple(
+    dict.fromkeys(h for hosts in MOWER_HOSTS.values() for h in hosts)
+)
+
+# Order to ask "which region owns this account?": the primary host of each region
+# first (so every region is covered in 4 calls), then the secondary ones as a
+# fallback. NB: do NOT use passport_hosts(None) for this -- it resolves to the
+# default region and would only ever ask Europe.
+ALL_PASSPORT_HOSTS: Final = tuple(
+    dict.fromkeys(
+        [hosts[0] for hosts in PASSPORT_HOSTS.values() if hosts]
+        + [h for hosts in PASSPORT_HOSTS.values() for h in hosts[1:]]
+    )
+)
+
+
+def canonical_region(region: str | None) -> str:
+    """Normalise a region code ('EU' -> 'fra'); unknown codes are kept as-is."""
+    code = str(region or "").strip().lower()
+    if not code:
+        return DEFAULT_REGION
+    return _REGION_ALIASES.get(code, code)
+
+
+def passport_hosts(region: str | None) -> tuple[str, ...]:
+    """Passport hosts to try for a region (all of them if the code is unknown)."""
+    return PASSPORT_HOSTS.get(canonical_region(region)) or ALL_PASSPORT_HOSTS
+
+
+def mower_hosts(region: str | None) -> tuple[str, ...]:
+    """Mower-cloud hosts to try for a region.
+
+    Falls back to every known host when the region has none mapped (``us``) or is
+    unrecognised, so a new/unknown region degrades to "try everything" instead of
+    failing outright.
+    """
+    hosts = MOWER_HOSTS.get(canonical_region(region)) or ()
+    extra = tuple(h for h in _ALL_MOWER_HOSTS if h not in hosts)
+    return hosts + extra
 
 # --- Polling ---------------------------------------------------------------
 DEFAULT_SCAN_INTERVAL: Final = 30  # seconds, conservative (private API has no push)

@@ -6,7 +6,8 @@
         "description": "Inserisci email e password dell'account Segway/Navimow che possiede (o a cui e' stato condiviso) il robot. Consiglio: usa un account dedicato a cui il robot e' condiviso, cosi' la sessione del telefono principale non viene disturbata.",
         "data": {
           "email": "Email",
-          "password": "Password"
+          "password": "Password",
+          "region": "Server (regione)"
         }
       },
       "select_vehicle": {
@@ -218,6 +219,17 @@
     "camera": {
       "map": {
         "name": "Mappa"
+      }
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Rileva automaticamente",
+        "fra": "Europa (fra)",
+        "sg": "Asia-Pacifico (sg)",
+        "us": "Americhe (us)",
+        "bj": "Cina (bj)"
       }
     }
   }

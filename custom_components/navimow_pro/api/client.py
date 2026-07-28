@@ -22,12 +22,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from ..const import DEFAULT_REGION, canonical_region, mower_hosts
 from . import crypto, passport
 from .passport import PassportAuthError, PassportError, Tokens
 
 _LOGGER = logging.getLogger(__name__)
 
-HOST = "https://navimow-fra.ninebot.com"
 _HEADERS = {"Content-Type": "text/html", "ninebot-version": "1"}
 
 CODE_OK = 1
@@ -80,14 +80,19 @@ class NavimowCloudClient:
         *,
         tokens: Tokens | None = None,
         uid: str = "",
-        region: str = "fra",
+        region: str = DEFAULT_REGION,
         language: str = "en",
+        host: str | None = None,
     ) -> None:
         self._device_id = device_id
         self._tokens = tokens or Tokens("", "")
         self._uid = uid
-        self._region = region or "fra"
+        self._region = canonical_region(region)
         self._language = language or "en"
+        # The mower cloud is regional too. ``host`` is the one resolved at setup
+        # time (persisted in the entry); without it fall back to the region's
+        # first candidate.
+        self._host = host or mower_hosts(self._region)[0]
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ state
@@ -107,6 +112,15 @@ class NavimowCloudClient:
     def region(self) -> str:
         return self._region
 
+    @property
+    def host(self) -> str:
+        """The mower-cloud host in use (persist it so runtime is deterministic)."""
+        return self._host
+
+    @host.setter
+    def host(self, value: str) -> None:
+        self._host = value
+
     def session_state(self) -> dict[str, str]:
         """Log-safe-to-persist snapshot of the mutable session state."""
         return {
@@ -114,19 +128,28 @@ class NavimowCloudClient:
             "refresh_token": self._tokens.refresh_token,
             "uid": self._uid,
             "region": self._region,
+            "host": self._host,
         }
 
     # ------------------------------------------------------------------ auth
-    def authenticate(self, email: str, password: str) -> Tokens:
-        """Passport login with email/password. Stores and returns tokens."""
-        self._tokens = passport.login(email, password)
-        self._region = self._tokens.region or self._region
+    def authenticate(self, email: str, password: str, region: str | None = None) -> Tokens:
+        """Passport login with email/password. Stores and returns tokens.
+
+        ``region`` pins the regional server; omitted, it is resolved from the
+        account. The mower host follows the resolved region unless one was pinned
+        explicitly at construction.
+        """
+        self._tokens = passport.login(email, password, region)
+        new_region = canonical_region(self._tokens.region or region or self._region)
+        if new_region != self._region:
+            self._region = new_region
+            self._host = mower_hosts(new_region)[0]
         return self._tokens
 
     def refresh_session(self) -> Tokens:
         """Refresh passport tokens via the refresh_token (perpetual)."""
-        self._tokens = passport.refresh(self._tokens)
-        self._region = self._tokens.region or self._region
+        self._tokens = passport.refresh(self._tokens, self._region)
+        self._region = canonical_region(self._tokens.region or self._region)
         return self._tokens
 
     def _common_params(self, access_token: str = "", uid: str = "") -> dict:
@@ -200,7 +223,9 @@ class NavimowCloudClient:
     # ------------------------------------------------------------- transport
     def _post(self, path: str, envelope: dict) -> dict:
         data = json.dumps(envelope, separators=(",", ":")).encode()
-        req = urllib.request.Request(HOST + path, data=data, headers=_HEADERS, method="POST")
+        req = urllib.request.Request(
+            f"https://{self._host}{path}", data=data, headers=_HEADERS, method="POST"
+        )
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read())

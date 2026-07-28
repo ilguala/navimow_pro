@@ -27,6 +27,9 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -38,6 +41,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_LANGUAGE,
     CONF_MODEL,
+    CONF_MOWER_HOST,
     CONF_REFRESH_TOKEN,
     CONF_REGION,
     CONF_UID,
@@ -47,6 +51,9 @@ from .const import (
     DEFAULT_LANGUAGE,
     DOMAIN,
     OPT_ZONES,
+    REGION_AUTO,
+    REGIONS,
+    mower_hosts,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +66,15 @@ _USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
         ),
+        # Normally detected from the account; the override is the safety net for a
+        # region we fail to resolve (see const.PASSPORT_HOSTS).
+        vol.Optional(CONF_REGION, default=REGION_AUTO): SelectSelector(
+            SelectSelectorConfig(
+                options=[REGION_AUTO, *REGIONS],
+                translation_key="region",
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        ),
     }
 )
 
@@ -70,24 +86,45 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._email: str | None = None
+        self._region: str | None = None  # None = detect from the account
         self._device_id: str | None = None
         self._client: NavimowCloudClient | None = None
         self._vehicles: list[dict] = []
         self._reauth_entry: ConfigEntry | None = None
 
     # ---------------------------------------------------------------- helpers
-    async def _authenticate(self, email: str, password: str) -> list[dict]:
-        """Log in and discover vehicles. Raises for the caller to map to errors."""
+    async def _authenticate(
+        self, email: str, password: str, region: str | None = None
+    ) -> list[dict]:
+        """Log in and discover vehicles. Raises for the caller to map to errors.
+
+        The account lives on ONE regional server (us / fra / sg / bj), and the
+        mower cloud is regional too. So: resolve the region from the account
+        (unless the user pinned one), then probe the region's mower hosts and keep
+        the first that answers -- persisted afterwards so runtime never guesses.
+        """
         device_id = self._device_id or uuid.uuid4().hex
         self._device_id = device_id
         client = NavimowCloudClient(device_id=device_id, language=DEFAULT_LANGUAGE)
 
         def _do() -> list[dict]:
-            client.authenticate(email, password)
-            client.mower_login()
-            return client.auth_list()
+            client.authenticate(email, password, region)
+            candidates = mower_hosts(client.region)
+            last: Exception | None = None
+            for host in candidates:
+                client.host = host
+                try:
+                    client.mower_login()
+                    return client.auth_list()
+                except (NavimowError, OSError) as err:
+                    last = err
+                    _LOGGER.debug("mower cloud %s not usable: %s", host, err)
+            raise last or NavimowError("no_host", "no reachable mower cloud host")
 
         vehicles = await self.hass.async_add_executor_job(_do)
+        _LOGGER.info(
+            "Navimow: region=%s, mower cloud=%s", client.region, client.host
+        )
         self._client = client
         return vehicles
 
@@ -101,6 +138,7 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_UID: state["uid"],
             CONF_DEVICE_ID: self._client.device_id,
             CONF_REGION: state["region"],
+            CONF_MOWER_HOST: state["host"],
             CONF_LANGUAGE: DEFAULT_LANGUAGE,
             CONF_VEHICLE_SN: str(vehicle.get("vehicle_sn", "")),
             CONF_VEHICLE_TYPE: int(vehicle.get("vehicle_type", 0) or 0),
@@ -117,9 +155,11 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             self._email = user_input[CONF_EMAIL].strip()
+            chosen = user_input.get(CONF_REGION, REGION_AUTO)
+            self._region = None if chosen == REGION_AUTO else chosen
             try:
                 self._vehicles = await self._authenticate(
-                    self._email, user_input[CONF_PASSWORD]
+                    self._email, user_input[CONF_PASSWORD], self._region
                 )
             except PassportAuthError:
                 errors["base"] = "invalid_auth"
@@ -263,6 +303,9 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is not None:
             self._email = self._reauth_entry.data.get(CONF_EMAIL)
             self._device_id = self._reauth_entry.data.get(CONF_DEVICE_ID)
+            # Keep the region already resolved for this account (a re-detect would
+            # only repeat the same lookup).
+            self._region = self._reauth_entry.data.get(CONF_REGION) or None
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -273,7 +316,9 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
             email = (user_input.get(CONF_EMAIL) or self._email or "").strip()
             self._email = email
             try:
-                self._vehicles = await self._authenticate(email, user_input[CONF_PASSWORD])
+                self._vehicles = await self._authenticate(
+                    email, user_input[CONF_PASSWORD], self._region
+                )
             except PassportAuthError:
                 errors["base"] = "invalid_auth"
             except (PassportError, NavimowError):

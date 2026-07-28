@@ -30,12 +30,14 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_DEVICE_ID,
     CONF_LANGUAGE,
+    CONF_MOWER_HOST,
     CONF_REFRESH_TOKEN,
     CONF_REGION,
     CONF_UID,
     CONF_VEHICLE_SN,
     CONF_VEHICLE_TYPE,
     DEFAULT_LANGUAGE,
+    DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
     DOCKED_STATES,
     DOMAIN,
@@ -522,16 +524,19 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         )
         self.entry = entry
         data = entry.data
+        region = data.get(CONF_REGION) or DEFAULT_REGION
         self.client = NavimowCloudClient(
             device_id=data[CONF_DEVICE_ID],
             tokens=Tokens(
                 access_token=data.get(CONF_ACCESS_TOKEN, ""),
                 refresh_token=data.get(CONF_REFRESH_TOKEN, ""),
-                region=data.get(CONF_REGION, "fra"),
+                region=region,
             ),
             uid=data.get(CONF_UID, ""),
-            region=data.get(CONF_REGION, "fra"),
+            region=region,
             language=data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+            # Resolved at setup; older entries have none -> derived from region.
+            host=data.get(CONF_MOWER_HOST) or None,
         )
         self.sn: str = data[CONF_VEHICLE_SN]
         self.vehicle_type: int = int(data.get(CONF_VEHICLE_TYPE, 0) or 0)

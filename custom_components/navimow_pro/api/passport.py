@@ -20,12 +20,21 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from ..const import (
+    ALL_PASSPORT_HOSTS,
+    DEFAULT_REGION,
+    canonical_region,
+    passport_hosts,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
-HOST = "https://api-passport-fra.willand.com"
+# Kept for backwards compatibility with older entries / callers that pass no host.
+DEFAULT_HOST = "api-passport-fra.willand.com"
 
 # App identity (self-consistent; the server validates the sign against these).
 CLIENT_ID = "mowerbot_app_prod"
@@ -39,6 +48,8 @@ DEVICE = "ANDROID"
 _RESULT_OK = "90000"
 # resultCodes that mean the access token is expired / must be refreshed.
 RESULT_TOKEN_EXPIRED = {"90015", "90016"}
+# The account is not on THIS regional server (each region has its own directory).
+RESULT_ACCOUNT_NOT_EXISTS = "00002"
 
 
 class PassportError(Exception):
@@ -104,11 +115,23 @@ def _signed_headers(url: str, req_params: dict) -> dict:
     }
 
 
-def _post(path: str, params: dict, timeout: int = 20) -> dict:
-    body = json.dumps(params).encode()
-    req = urllib.request.Request(
-        HOST + path, data=body, headers=_signed_headers(path, params), method="POST"
-    )
+def _request(
+    host: str, path: str, params: dict, *, method: str, timeout: int = 20
+) -> dict:
+    """Signed passport call against a specific regional host.
+
+    The sign covers the request params, which for a GET are the query string and
+    for a POST the JSON body -- nothing else (verified live: adding any extra key
+    yields resultCode 90031 "sign invalid").
+    """
+    headers = _signed_headers(path, params)
+    url = f"https://{host}{path}"
+    body = None
+    if method == "POST":
+        body = json.dumps(params).encode()
+    elif params:
+        url += "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
@@ -119,37 +142,86 @@ def _post(path: str, params: dict, timeout: int = 20) -> dict:
             raise PassportError(err.code, "HTTP error") from inner
 
 
+def _post(path: str, params: dict, host: str = DEFAULT_HOST, timeout: int = 20) -> dict:
+    return _request(host, path, params, method="POST", timeout=timeout)
+
+
+def lookup_region(email: str, hosts: tuple[str, ...] | None = None) -> str | None:
+    """Which regional server owns this account? ``None`` if nobody claims it.
+
+    ``GET /v3/region`` needs only the e-mail -- no password -- so the password is
+    never offered to a server that does not own the account. Each region keeps its
+    own directory: the wrong one answers ``00002 account not exists``, so the owner
+    is found by asking each in turn (a closed set of four).
+    """
+    for host in hosts or ALL_PASSPORT_HOSTS:
+        params = {"account": email, "device": DEVICE}
+        try:
+            j = _request(host, "/v3/region", params, method="GET", timeout=15)
+        except (PassportError, OSError) as err:
+            _LOGGER.debug("region lookup on %s failed: %s", host, err)
+            continue
+        code = str(j.get("resultCode"))
+        if code == _RESULT_OK:
+            region = canonical_region((j.get("data") or {}).get("region"))
+            _LOGGER.debug("region lookup: %s owns this account -> %s", host, region)
+            return region
+        if code != RESULT_ACCOUNT_NOT_EXISTS:
+            _LOGGER.debug("region lookup on %s: %s %s", host, code, j.get("resultDesc"))
+    return None
+
+
 def _extract_tokens(data: dict) -> Tokens:
+    # Region left EMPTY when absent -- the caller knows which server answered and
+    # must not have "fra" silently invented for it.
+    raw_region = data.get("region")
     return Tokens(
         access_token=str(data.get("access_token", "")),
         refresh_token=str(data.get("refresh_token", "")),
         uuid=str(data.get("uuid") or ""),
-        region=str(data.get("region") or "fra"),
+        region=canonical_region(raw_region) if raw_region else "",
     )
 
 
-def login(username: str, password: str) -> Tokens:
-    """POST /v3/user/login -> Tokens. Raises PassportAuthError on bad creds."""
+def login(username: str, password: str, region: str | None = None) -> Tokens:
+    """POST /v3/user/login -> Tokens. Raises PassportAuthError on bad creds.
+
+    ``region`` selects the regional server; when omitted it is resolved from the
+    account first (see :func:`lookup_region`). The region's hosts are tried in
+    order so a single dead endpoint does not break login.
+    """
+    if not region:
+        region = lookup_region(username) or DEFAULT_REGION
+    hosts = passport_hosts(region)
     params = {"username": username, "password": password, "device": DEVICE}
-    j = _post("/v3/user/login", params)
-    code = str(j.get("resultCode"))
-    if code != _RESULT_OK:
-        # Wrong email/password and similar user-facing failures.
-        raise PassportAuthError(code, str(j.get("resultDesc", "")))
-    data = j.get("data") or {}
-    tokens = _extract_tokens(data)
-    _LOGGER.debug("passport login ok: %s", tokens.redacted())
-    return tokens
+    last: PassportAuthError | None = None
+    for host in hosts:
+        j = _post("/v3/user/login", params, host)
+        code = str(j.get("resultCode"))
+        if code == _RESULT_OK:
+            data = j.get("data") or {}
+            tokens = _extract_tokens(data)
+            # Trust the region we actually authenticated against: some backends
+            # echo a stale/absent value.
+            tokens.region = canonical_region(tokens.region) or canonical_region(region)
+            _LOGGER.debug("passport login ok on %s: %s", host, tokens.redacted())
+            return tokens
+        last = PassportAuthError(code, str(j.get("resultDesc", "")))
+        # Only "not here" is worth retrying elsewhere; bad credentials are final.
+        if code != RESULT_ACCOUNT_NOT_EXISTS:
+            raise last
+    raise last or PassportAuthError("unknown", "login failed")
 
 
-def refresh(tokens: Tokens) -> Tokens:
+def refresh(tokens: Tokens, region: str | None = None) -> Tokens:
     """POST /v3/user/refresh -> new Tokens (perpetual refresh)."""
     params = {
         "access_token": tokens.access_token,
         "refresh_token": tokens.refresh_token,
         "device": DEVICE,
     }
-    j = _post("/v3/user/refresh", params)
+    host = passport_hosts(region or tokens.region)[0]
+    j = _post("/v3/user/refresh", params, host)
     code = str(j.get("resultCode"))
     if code != _RESULT_OK:
         raise PassportAuthError(code, str(j.get("resultDesc", "")))
@@ -158,7 +230,7 @@ def refresh(tokens: Tokens) -> Tokens:
     # Some backends omit uuid/region on refresh -> keep the previous values.
     if not new.uuid:
         new.uuid = tokens.uuid
-    if not new.region or new.region == "fra":
-        new.region = tokens.region or new.region
+    if not new.region:
+        new.region = canonical_region(region or tokens.region)
     _LOGGER.debug("passport refresh ok: %s", new.redacted())
     return new

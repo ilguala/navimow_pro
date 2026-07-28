@@ -6,7 +6,8 @@
         "description": "Enter the email and password of the Segway/Navimow account that owns (or was shared) the mower. Tip: use a dedicated account that the mower is shared with, so your primary phone session is not disturbed.",
         "data": {
           "email": "Email",
-          "password": "Password"
+          "password": "Password",
+          "region": "Server region"
         }
       },
       "select_vehicle": {
@@ -218,6 +219,17 @@
     "camera": {
       "map": {
         "name": "Map"
+      }
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Detect automatically",
+        "fra": "Europe (fra)",
+        "sg": "Asia-Pacific (sg)",
+        "us": "Americas (us)",
+        "bj": "China (bj)"
       }
     }
   }
