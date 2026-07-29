@@ -26,6 +26,14 @@ OPT_ZONES: Final = "zones"  # user-supplied "id:name,id:name" mapping (fallback 
 
 DEFAULT_LANGUAGE: Final = "en"
 
+# The vendor app accepts 6-18 character passwords ("Please enter password (6-18
+# characters)" in its own resources) and silently keeps only the first 18 when a
+# longer one is set. Entering the full thing here then fails as a wrong password,
+# which is baffling -- so a refusal with an over-long password gets its own hint
+# rather than a plain "wrong password". Not enforced: an account may legitimately
+# hold a longer password set elsewhere.
+PASSWORD_MAX_LEN: Final = 18
+
 # --- Server regions -----------------------------------------------------------
 # The account lives on ONE regional server; talking to the wrong one fails at
 # login ("account not exists"), so the region must be resolved, not assumed.

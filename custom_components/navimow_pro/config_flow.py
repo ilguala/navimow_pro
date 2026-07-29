@@ -57,6 +57,7 @@ from .const import (
     DEFAULT_LANGUAGE,
     DOMAIN,
     OPT_ZONES,
+    PASSWORD_MAX_LEN,
     REGION_AUTO,
     REGIONS,
     mower_hosts,
@@ -194,11 +195,14 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Log the server's own code: "invalid_auth" alone leaves a user
                 # with nothing to report when the real cause is something else.
                 _LOGGER.warning("Navimow login refused: %s", err)
-                errors["base"] = (
-                    "account_not_found"
-                    if err.code == RESULT_ACCOUNT_NOT_EXISTS
-                    else "invalid_auth"
-                )
+                if err.code == RESULT_ACCOUNT_NOT_EXISTS:
+                    errors["base"] = "account_not_found"
+                elif len(user_input[CONF_PASSWORD]) > PASSWORD_MAX_LEN:
+                    # Very likely the app kept only the first 18 characters when
+                    # the password was set, so the full one never matches.
+                    errors["base"] = "password_too_long"
+                else:
+                    errors["base"] = "invalid_auth"
             except PassportError as err:
                 _LOGGER.warning("Navimow passport error: %s", err)
                 errors["base"] = "cannot_connect"
@@ -359,7 +363,11 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except PassportAuthError as err:
                 _LOGGER.warning("Navimow reauth refused: %s", err)
-                errors["base"] = "invalid_auth"
+                errors["base"] = (
+                    "password_too_long"
+                    if len(user_input[CONF_PASSWORD]) > PASSWORD_MAX_LEN
+                    else "invalid_auth"
+                )
             except (PassportError, NavimowError) as err:
                 _LOGGER.warning("Navimow reauth error: %s", err)
                 errors["base"] = "cannot_connect"

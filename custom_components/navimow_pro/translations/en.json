@@ -35,6 +35,7 @@
       }
     },
     "error": {
+      "password_too_long": "That password was refused. The Navimow app only accepts passwords of 6-18 characters and keeps just the first 18 when a longer one is set, so a longer password never matches here. Try its first 18 characters, or set a shorter password in the app.",
       "account_not_found": "That account was not found on any Navimow server. Check the address, or pick your server region manually below.",
       "invalid_auth": "Invalid email or password.",
       "cannot_connect": "Could not reach the Navimow cloud. Try again.",
