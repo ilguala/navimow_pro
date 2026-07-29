@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import logging
+import re
 import threading
 import time
 from datetime import timedelta
@@ -43,8 +44,13 @@ from .const import (
     DOMAIN,
     FAST_SCAN_INTERVAL,
     MOW_SCAN_INTERVAL,
+    ERROR_CODES,
+    ERROR_RESUME_HINT,
+    FAULT_STATE_FAMILY,
+    KNOWN_STATES,
     OPT_ZONES,
     SLOW_REFRESH_EVERY,
+    STATE_FAMILY_LABELS,
     STATE_MOWING,
     TRAIL_MAX_POINTS,
     TRAIL_MIN_STEP_M,
@@ -421,6 +427,79 @@ def _parse_schedule(set_list: Any, zone_names: dict) -> list[dict]:
     return out
 
 
+def _state_label(state_code: str) -> str:
+    """Readable state; unknown codes fall back to their family, not "Unknown".
+
+    Only five codes are individually known, but the first byte reliably tells the
+    family -- so an unrecognised 03xx still reads "Stopped (fault)" rather than
+    leaving the user staring at a number.
+    """
+    if not state_code:
+        return "Unknown"
+    known = VEHICLE_STATE_LABELS.get(state_code)
+    if known:
+        return known
+    family = STATE_FAMILY_LABELS.get(state_code[:2])
+    return f"{family} ({state_code})" if family else f"Unknown ({state_code})"
+
+
+def _state_code(index2: Any) -> str:
+    """The mower's raw state code from an index2 payload ('' when absent)."""
+    if not isinstance(index2, dict):
+        return ""
+    return str(index2.get("vehicle_state") or index2.get("vehicleState") or "").strip()
+
+
+def _collect_error_codes(obj: Any, out: list[str], depth: int = 0) -> None:
+    """Pull fault codes out of whatever shape the endpoint returned.
+
+    The payload's exact layout is not documented and we have never captured one
+    with a fault present, so rather than guess a schema this walks the structure
+    and picks up anything that looks like a code. Unknown shapes simply yield
+    nothing instead of raising.
+    """
+    if depth > 6 or obj is None:
+        return
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, (str, int)) and re.fullmatch(
+                r"(?i)(error|fault|hint)?_?code", str(key)
+            ):
+                code = str(value).strip()
+                if code and code not in out:
+                    out.append(code)
+            else:
+                _collect_error_codes(value, out, depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_error_codes(item, out, depth + 1)
+
+
+def _parse_errors(payload: Any, inline: Any) -> tuple[bool, str | None]:
+    """(has_fault, human text) from the fault endpoint, falling back to index2.
+
+    Codes are translated through our own ERROR_CODES descriptions; anything we do
+    not recognise is still surfaced as "Fault <code>" rather than swallowed, so a
+    stopped mower is never silent.
+    """
+    codes: list[str] = []
+    _collect_error_codes(payload, codes)
+    if not codes:
+        _collect_error_codes(inline, codes)
+    if not codes:
+        # Last resort: a plain description carried inline.
+        if isinstance(inline, list) and inline and isinstance(inline[0], dict):
+            desc = inline[0].get("desc") or inline[0].get("message")
+            if desc:
+                return True, str(desc)
+        return False, None
+    parts = [ERROR_CODES.get(c, f"Fault {c}") for c in codes[:3]]
+    text = "; ".join(parts)
+    if any(c in ERROR_CODES for c in codes):
+        text = f"{text} ({ERROR_RESUME_HINT})"
+    return True, text
+
+
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     """Per-zone mowing coverage from get-path-info-time.
 
@@ -696,6 +775,24 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         except NavimowError:
             raw.setdefault("path_info_time", [])
 
+        # Fault detail: only worth a request when something looks wrong, so the
+        # normal polling loop stays as light as it is today. index2's inline array
+        # is empty even while the mower sits stopped with a fault, so an unfamiliar
+        # state code is the trigger that matters.
+        state_code = _state_code(raw.get("index2") or {})
+        if (raw.get("index2") or {}).get("error_data") or (
+            state_code and state_code not in KNOWN_STATES
+        ):
+            try:
+                raw["errors"] = self.client.errors(sn, vtype)
+                _LOGGER.debug("fault payload (state %s): %s", state_code, raw["errors"])
+            except NavimowAuthError:
+                raise
+            except NavimowError:
+                raw.setdefault("errors", {})
+        else:
+            raw["errors"] = {}
+
         # Slow, only every N cycles (or on the first successful fetch).
         self._cycle = (self._cycle + 1) % SLOW_REFRESH_EVERY
         if self._cycle == 1 or "set_list" not in raw:
@@ -837,14 +934,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Error detection from index2's inline error array (the hint-error
         # endpoint returns a compressed blob we intentionally do not decode).
         error_list = index2.get("error_data") or _find(index2, "errorData", "error_list") or []
-        has_error = bool(error_list)
-        error_text = None
-        if has_error and isinstance(error_list, list) and error_list:
-            first = error_list[0]
-            if isinstance(first, dict):
-                error_text = str(
-                    first.get("desc") or first.get("message") or first.get("code") or "error"
-                )
+        has_error, error_text = _parse_errors(raw.get("errors"), error_list)
 
         # Current zone(s) from index2.partitionIdList (big-endian). An EMPTY
         # list means "all zones / whole map" -> show "All", never "Unknown".
@@ -864,6 +954,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         trail = self._update_trail(position, state_code)
 
         activity = VEHICLE_STATE_TO_ACTIVITY.get(state_code, ACTIVITY_DOCKED)
+        if state_code[:2] == FAULT_STATE_FAMILY:
+            # A stopped-with-fault mower is anything but docked.
+            activity = ACTIVITY_ERROR
         if has_error:
             activity = ACTIVITY_ERROR
 
@@ -956,7 +1049,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # core state
             "battery": battery,
             "state_code": state_code,
-            "state": VEHICLE_STATE_LABELS.get(state_code, f"Unknown ({state_code})" if state_code else "Unknown"),
+            "state": _state_label(state_code),
             "activity": activity,
             "online": online,
             "docked": state_code in DOCKED_STATES,

@@ -151,6 +151,104 @@ VEHICLE_STATE_TO_ACTIVITY: Final[dict[str, str]] = {
     STATE_RETURNING: ACTIVITY_RETURNING,
 }
 
+# The state code's first byte is the family: 01 docked, 02 working, 03 stopped
+# with a fault (seen live as 0310 on a mower stuck in the garden). Codes we have
+# not identified individually still get a sensible family label, and an 03xx code
+# is what triggers fetching the fault detail.
+STATE_FAMILY_LABELS: Final[dict[str, str]] = {
+    "01": "Docked",
+    "02": "Working",
+    "03": "Stopped (fault)",
+}
+FAULT_STATE_FAMILY: Final = "03"
+
+KNOWN_STATES: Final = frozenset(VEHICLE_STATE_TO_ACTIVITY)
+
+# --- Fault codes --------------------------------------------------------------
+# The mower reports a numeric fault code; these are our own short descriptions of
+# what each one means, so a stopped mower says something useful instead of just a
+# number. Deliberately paraphrased and kept terse -- the vendor's own wording is
+# not reproduced here. Unknown codes fall back to "Fault <code>".
+#
+# Families: 1xxx cutting/battery, 2xxx sensors, 3xxx drive, 4xxx electronics and
+# links, 5xxx charging station, 6xxx navigation and mission, 7xxx positioning,
+# 8xxx vision.
+ERROR_CODES: Final[dict[str, str]] = {
+    "1001": "Blade motor failed to start",
+    "1002": "Blade motor overvoltage",
+    "1003": "Blade motor undervoltage",
+    "1004": "Blade motor overcurrent",
+    "1005": "Blade motor jammed - check the blade disc for obstructions",
+    "1008": "Cutting-height motor jammed",
+    "1009": "Cutting-height motor overcurrent",
+    "1010": "Control unit self-check failed",
+    "1018": "Cutting-height motor control failure",
+    "1020": "Battery overvoltage",
+    "1021": "Battery undervoltage",
+    "1022": "Battery discharge protection",
+    "1023": "Battery charge protection",
+    "1024": "Battery too hot",
+    "1025": "Battery too cold",
+    "2010": "Sensor self-check failed",
+    "3001": "Wheel motor jammed - check the wheels for obstructions",
+    "3002": "Wheel motor overspeed",
+    "3003": "Motion sensor (IMU) bias error",
+    "3004": "Wheel motor calibration error",
+    "3005": "Wheel motor short circuit",
+    "3006": "Wheel motor calibration corrupted",
+    "3007": "Wheel motor communication error",
+    "3008": "Wheel motor overheated",
+    "3010": "Drive unit self-check failed",
+    "4001": "Storage error",
+    "4003": "Control electronics overheated",
+    "4004": "Drive electronics overheated",
+    "4007": "Bluetooth link error",
+    "4008": "Cloud link error",
+    "4010": "Blade motor communication error",
+    "4011": "Charging station communication error",
+    "4012": "Sensor communication error",
+    "4013": "Ultrasonic module communication error",
+    "4014": "Charging station communication error",
+    "4020": "Electronics self-check failed",
+    "5001": "Charging station antenna error",
+    "5002": "Charging station guide wire error",
+    "5003": "Charging station over-current or over-voltage",
+    "6002": "Mower is outside the boundary",
+    "6003": "Mower has turned over",
+    "6004": "Cannot find the way back to the charging station",
+    "6005": "Cannot find the way back to the charging station",
+    "6006": "Bumper triggered continuously",
+    "6007": "Mower has been lifted",
+    "6008": "Bumper triggered too many times",
+    "6010": "Cannot plan a route - move it to flat ground inside the boundary",
+    "6011": "Mower is stuck - free it",
+    "6012": "Charging station or antenna moved since mapping",
+    "6014": "Mower is outside the boundary - put it back inside",
+    "6015": "Mower is stuck on an obstacle - free it and place it on flat ground",
+    "6016": "Mower is stuck on an obstacle - free it and place it on flat ground",
+    "6017": "Mower is stuck on an obstacle - free it and place it on flat ground",
+    "6018": "Cannot plan a route - move it to flat ground inside the boundary",
+    "6020": "Mower failed to start",
+    "6021": "Mower could not reach its destination",
+    "6022": "Mower could not get through the channel",
+    "6023": "Mower could not get through",
+    "7001": "Motion sensor data error",
+    "7002": "Cannot read the drive unit version",
+    "7003": "GPS data error",
+    "7004": "Compass data error",
+    "7005": "Positioning data stream fault",
+    "7006": "Could not recover its position",
+    "8001": "VisionFence camera communication error",
+    "8002": "VisionFence map error",
+    "8003": "Camera is dirty - clean the lens",
+    "8005": "VisionFence camera disconnected",
+    "8006": "VisionFence camera system error",
+}
+
+# Most faults need the STOP button pressed on the mower before it will resume;
+# worth saying once rather than repeating it in every message above.
+ERROR_RESUME_HINT: Final = "press STOP on the mower, then MOW+OK to resume"
+
 VEHICLE_STATE_LABELS: Final[dict[str, str]] = {
     STATE_IDLE_DOCKED: "Docked",
     STATE_IDLE_DOCKED_POST: "Docked (finished)",
