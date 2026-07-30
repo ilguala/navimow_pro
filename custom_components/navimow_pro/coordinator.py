@@ -744,6 +744,16 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self.update_interval = timedelta(seconds=interval)
         return snapshot
 
+    @property
+    def raw_payloads(self) -> dict[str, Any]:
+        """Last raw cloud responses, keyed by endpoint (read-only; diagnostics).
+
+        What a given model does or does not report is the first thing to check
+        when a field shows up empty, so the dump exposes these alongside the
+        parsed snapshot.
+        """
+        return dict(self._raw_cache)
+
     def _fetch_blocking(self) -> dict:
         """Runs in an executor thread. Fetches + parses one snapshot."""
         sn, vtype = self.sn, self.vehicle_type
