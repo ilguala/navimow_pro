@@ -1089,7 +1089,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "current_zone": current_zone,
             # What the job covers, as opposed to where the mower is right now.
             "selected_zones": selected_zones,
-            "current_zone_ids": current_ids,
+            "current_zone_ids": selected_ids,
             # weekly mowing schedule (days -> periods -> zones)
             "schedule": _parse_schedule(set_list, zone_names),
             # connectivity
