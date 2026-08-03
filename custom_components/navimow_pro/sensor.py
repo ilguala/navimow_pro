@@ -72,7 +72,10 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         key="current_zone",
         translation_key="current_zone",
         icon="mdi:select-marker",
+        # The zone being cut right now; the job's whole selection (which is what
+        # this used to show, even while mowing one zone of it) is an attribute.
         value_fn=lambda d: d.get("current_zone"),
+        attrs_fn=lambda d: {"selected_zones": d.get("selected_zones") or []},
     ),
     NavimowSensorDescription(
         key="coverage",

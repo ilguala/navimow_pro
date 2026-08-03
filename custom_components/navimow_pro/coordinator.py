@@ -946,16 +946,25 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         error_list = index2.get("error_data") or _find(index2, "errorData", "error_list") or []
         has_error, error_text = _parse_errors(raw.get("errors"), error_list)
 
-        # Current zone(s) from index2.partitionIdList (big-endian). An EMPTY
-        # list means "all zones / whole map" -> show "All", never "Unknown".
-        current_ids = decode_partition_id_list(str(index2.get("partitionIdList") or ""))
-        zones = self._resolve_zones(current_ids)
+        # index2.partitionIdList (big-endian) is the zone SELECTION for the job,
+        # not where the mower is now: mowing "all zones" lists every one of them.
+        # get-location carries the zone actually being cut, so prefer that and
+        # keep the selection as an attribute.
+        selected_ids = decode_partition_id_list(str(index2.get("partitionIdList") or ""))
+        zones = self._resolve_zones(selected_ids)
         zone_names = {z["id"]: z["name"] for z in zones}
-        current_zone = (
-            ", ".join(zone_names.get(i, f"Zone {i}") for i in current_ids)
-            if current_ids
-            else "All"
+        selected_zones = (
+            [zone_names.get(i, f"Zone {i}") for i in selected_ids] if selected_ids else ["All"]
         )
+        # 0 / absent means "not cutting a particular zone right now". Read both
+        # spellings: the private API is snake_case, the app's own bean camelCase.
+        active_id = _as_int(_find(location, "current_mow_boundary", "currentMowBoundary"))
+        if active_id:
+            current_zone = zone_names.get(active_id, f"Zone {active_id}")
+        elif selected_ids:
+            current_zone = ", ".join(selected_zones)
+        else:
+            current_zone = "All"
         map_geom = self._map_geometry or {}
 
         # Coverage (per-zone %) + reconstructed mowed trail (accumulated position).
@@ -1078,6 +1087,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # zones
             "zones": zones,
             "current_zone": current_zone,
+            # What the job covers, as opposed to where the mower is right now.
+            "selected_zones": selected_zones,
             "current_zone_ids": current_ids,
             # weekly mowing schedule (days -> periods -> zones)
             "schedule": _parse_schedule(set_list, zone_names),
