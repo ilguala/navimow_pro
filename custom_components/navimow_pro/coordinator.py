@@ -427,6 +427,30 @@ def _parse_schedule(set_list: Any, zone_names: dict) -> list[dict]:
     return out
 
 
+def _parse_work_position(raw: Any) -> tuple[int | None, float | None]:
+    """(zone id being cut, its progress %) from ``map_work_position``.
+
+    The blob is 32-bit big-endian words; word 3 is the zone the mower is working
+    and word 4 its progress in hundredths of a percent. Confirmed against the
+    app's own log line (``currentMowBoundary=5, currentMowProgress=396`` next to
+    a blob decoding to ``[8, 6, 0, 5, 396]``) and against a second mower, where
+    word 3 matched the zone its per-zone coverage was advancing on.
+
+    ``0`` and ``0xFFFFFFFF`` both mean "not working a zone right now".
+    """
+    text = str(raw or "").strip()
+    if len(text) < 40:
+        return None, None
+    try:
+        words = [int(text[i : i + 8], 16) for i in range(0, 40, 8)]
+    except ValueError:
+        return None, None
+    zone_id, progress = words[3], words[4]
+    if zone_id in (0, 0xFFFFFFFF):
+        return None, None
+    return zone_id, round(progress / 100, 2) if progress != 0xFFFFFFFF else None
+
+
 def _state_label(state_code: str) -> str:
     """Readable state; unknown codes fall back to their family, not "Unknown".
 
@@ -956,9 +980,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         selected_zones = (
             [zone_names.get(i, f"Zone {i}") for i in selected_ids] if selected_ids else ["All"]
         )
-        # 0 / absent means "not cutting a particular zone right now". Read both
-        # spellings: the private API is snake_case, the app's own bean camelCase.
-        active_id = _as_int(_find(location, "current_mow_boundary", "currentMowBoundary"))
+        # The zone actually being cut lives in map_work_position (present in both
+        # location and index2); None while docked or between zones.
+        active_id, active_pct = _parse_work_position(
+            location.get("map_work_position") or index2.get("map_work_position")
+        )
         if active_id:
             current_zone = zone_names.get(active_id, f"Zone {active_id}")
         elif selected_ids:
@@ -1089,6 +1115,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "current_zone": current_zone,
             # What the job covers, as opposed to where the mower is right now.
             "selected_zones": selected_zones,
+            "current_zone_progress": active_pct,
             "current_zone_ids": selected_ids,
             # weekly mowing schedule (days -> periods -> zones)
             "schedule": _parse_schedule(set_list, zone_names),

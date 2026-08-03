@@ -49,25 +49,31 @@ PASSWORD_MAX_LEN: Final = 18
 DEFAULT_REGION: Final = "fra"
 REGION_AUTO: Final = "auto"  # config-flow choice: detect from the account
 
-# Codes the backend also answers to, mapped onto the primary code.
-_REGION_ALIASES: Final = {"eu": "fra", "sea": "sg"}
+# Codes the backend also answers to, mapped onto the primary code. `ore`
+# (Oregon) is what a US account actually reports back and resolves to the same
+# server as `us`.
+_REGION_ALIASES: Final = {"eu": "fra", "sea": "sg", "ore": "us"}
 
 PASSPORT_HOSTS: Final = {
     "fra": ("api-passport-fra.willand.com", "api-passport-fra.ninebot.com"),
     "sg": ("api-passport-sg.willand.com", "api-passport-sg.ninebot.com"),
-    "us": ("api-passport-us.ninebot.com",),
+    "us": (
+        "api-passport-us.ninebot.com",
+        "api-passport-ore.ninebot.com",  # same IP; the code a US account reports
+        "api-passport-ore.willand.com",
+    ),
     "bj": ("api-passport-bj.willand.com", "api-passport-bj.ninebot.com"),
 }
 
 # Mower-cloud candidates per region, tried in order at setup; the first one that
-# answers is persisted (CONF_MOWER_HOST). NB: no `navimow-us*` host exists under
-# any of the three domains, so a US account falls back to trying them all -- if
-# that fails the user can set the host by hand (see the config flow).
+# answers is persisted (CONF_MOWER_HOST). There is no `navimow-us*` host: a US
+# account's mower data is served by the Frankfurt host, confirmed from a working
+# US setup (region "ore", mower host navimow-fra.ninebot.com).
 MOWER_HOSTS: Final = {
     "fra": ("navimow-fra.ninebot.com", "navimow-fra.willand.com"),
     "sg": ("navimow-sg.willand.com",),
     "bj": ("navimow-bj.ninebot.com", "navimow-bj.willand.com"),
-    "us": (),  # unknown -- see _ALL_MOWER_HOSTS fallback
+    "us": ("navimow-fra.ninebot.com", "navimow-ore.willand.com"),
 }
 
 REGIONS: Final = tuple(PASSPORT_HOSTS)
