@@ -1,0 +1,241 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion à Navimow (intégration privée)",
+        "description": "Saisissez l’adresse e-mail et le mot de passe du compte Segway/Navimow qui possède la tondeuse ou avec lequel elle a été partagée. Conseil : utilisez un compte dédié auquel la tondeuse est partagée afin de ne pas perturber la session de votre téléphone principal.",
+        "data": {
+          "email": "E-mail",
+          "password": "Mot de passe",
+          "region": "Région du serveur"
+        }
+      },
+      "select_vehicle": {
+        "title": "Choisir une tondeuse",
+        "description": "Plusieurs tondeuses ont été trouvées sur ce compte.",
+        "data": {
+          "vehicle_sn": "Robot tondeuse"
+        }
+      },
+      "manual": {
+        "title": "Saisir le numéro de série de la tondeuse",
+        "description": "Aucune tondeuse n’est associée à ce compte (ce qui est normal pour un compte partagé). Saisissez le numéro de série de la tondeuse (disponible dans l’application Navimow, dans les informations de l’appareil, par exemple S4THAxxxxxxxxxx). Il sera vérifié par une lecture en temps réel.",
+        "data": {
+          "vehicle_sn": "Numéro de série",
+          "vehicle_name": "Nom (facultatif)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Réauthentifier Navimow",
+        "description": "La session enregistrée a expiré. Saisissez à nouveau le mot de passe du compte.",
+        "data": {
+          "email": "E-mail",
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "password_too_long": "Ce mot de passe a été refusé. L’application Navimow accepte uniquement les mots de passe de 6 à 18 caractères et ne conserve que les 18 premiers lorsqu’un mot de passe plus long est défini. Un mot de passe plus long ne peut donc pas fonctionner ici. Essayez ses 18 premiers caractères ou définissez un mot de passe plus court dans l’application.",
+      "account_not_found": "Ce compte n’a été trouvé sur aucun serveur Navimow. Vérifiez l’adresse ou choisissez manuellement la région du serveur ci-dessous.",
+      "invalid_auth": "E-mail ou mot de passe invalide.",
+      "cannot_connect": "Impossible de joindre le cloud Navimow. Réessayez.",
+      "no_vehicles": "Aucune tondeuse n’est associée à ce compte.",
+      "vehicle_not_found": "Ce numéro de série n’a pas pu être lu avec ce compte. Vérifiez le numéro de série et assurez-vous que la tondeuse est bien partagée avec ce compte.",
+      "unknown": "Erreur inattendue. Consultez les journaux."
+    },
+    "abort": {
+      "already_configured": "Cette tondeuse est déjà configurée.",
+      "reauth_successful": "La réauthentification a réussi."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options Navimow",
+        "description": "Liste des zones pour le sélecteur, sous forme de paires id:nom séparées par des virgules (par exemple : 1:Zone 1,5:Zone 2). L’identifiant de région correspond à l’identifiant de la partition de la carte. Laissez vide pour utiliser la découverte automatique.",
+        "data": {
+          "zones": "Zones (id:nom,...)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lawn_mower": {
+      "mower": {
+        "name": "Robot tondeuse"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Batterie"
+      },
+      "state": {
+        "name": "État"
+      },
+      "state_code": {
+        "name": "Code d’état"
+      },
+      "mowing_progress": {
+        "name": "Progression de la tonte"
+      },
+      "current_zone": {
+        "name": "Zone actuelle"
+      },
+      "session_area": {
+        "name": "Surface tondue pendant la session"
+      },
+      "weekly_area": {
+        "name": "Surface tondue cette semaine"
+      },
+      "total_area": {
+        "name": "Surface totale tondue"
+      },
+      "next_mow": {
+        "name": "Prochaine tonte"
+      },
+      "error_text": {
+        "name": "Erreur"
+      },
+      "signal_wifi": {
+        "name": "Signal Wi-Fi"
+      },
+      "blades_life": {
+        "name": "Durée de vie des lames"
+      },
+      "chassis_life": {
+        "name": "Durée de vie du châssis"
+      },
+      "schedule": {
+        "name": "Planning de tonte"
+      },
+      "coverage": {
+        "name": "Couverture"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Planning de tonte"
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problème"
+      },
+      "online": {
+        "name": "En ligne"
+      },
+      "docked": {
+        "name": "À la station"
+      }
+    },
+    "switch": {
+      "schedule_enabled": {
+        "name": "Planning de tonte activé"
+      },
+      "night_mow": {
+        "name": "Tonte nocturne"
+      },
+      "rain_sensor": {
+        "name": "Capteur de pluie"
+      },
+      "rain_detection": {
+        "name": "Détection de pluie"
+      },
+      "sound": {
+        "name": "Son de la tondeuse"
+      },
+      "power_saving": {
+        "name": "Économie d’énergie"
+      },
+      "child_lock": {
+        "name": "Verrouillage enfant"
+      },
+      "lift_alarm": {
+        "name": "Alarme en cas de soulèvement"
+      },
+      "mowing_cycle": {
+        "name": "Mode de tonte cyclique"
+      },
+      "frost_delay": {
+        "name": "Report de la tonte en cas de gel"
+      },
+      "snow_delay": {
+        "name": "Report de la tonte en cas de neige"
+      },
+      "storm_delay": {
+        "name": "Report de la tonte en cas de vent fort"
+      },
+      "high_temp_delay": {
+        "name": "Report de la tonte en cas de température élevée"
+      },
+      "efls": {
+        "name": "Positionnement assisté par caméra (EFLS)"
+      },
+      "obstacle_avoidance": {
+        "name": "Évitement des obstacles"
+      },
+      "traction_control": {
+        "name": "Contrôle de traction"
+      },
+      "animal_protection": {
+        "name": "Protection des animaux"
+      },
+      "night_light": {
+        "name": "Éclairage nocturne"
+      },
+      "weather_rain": {
+        "name": "Prise en compte des prévisions de pluie"
+      },
+      "rain_delay_mode": {
+        "name": "Report de la tonte en cas de pluie"
+      }
+    },
+    "select": {
+      "zone": {
+        "name": "Zone de tonte"
+      },
+      "night_light_level": {
+        "name": "Luminosité de l’éclairage nocturne",
+        "state": {
+          "dim": "Faible",
+          "very_dim": "Très faible"
+        }
+      },
+      "weather_sensitivity": {
+        "name": "Sensibilité aux prévisions de pluie",
+        "state": {
+          "drizzle": "Bruine",
+          "light": "Pluie faible",
+          "moderate": "Pluie modérée"
+        }
+      }
+    },
+    "number": {
+      "return_battery_level": {
+        "name": "Niveau de batterie pour le retour à la station"
+      },
+      "charging_limit": {
+        "name": "Limite de charge"
+      },
+      "rain_delay_time": {
+        "name": "Durée du report de tonte en cas de pluie"
+      }
+    },
+    "camera": {
+      "map": {
+        "name": "Carte"
+      }
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Détection automatique",
+        "fra": "Europe (fra)",
+        "sg": "Asie-Pacifique (sg)",
+        "us": "Amériques (us)",
+        "bj": "Chine (bj)"
+      }
+    }
+  }
+}
