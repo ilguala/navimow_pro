@@ -49,6 +49,18 @@ Lovelace resource needed) — just add them from the dashboard card picker:
 There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
 **`navimow_pro.set_schedule`** service for automations.
 
+> **"Custom element not found: navimow-mow-card"?** The loader is injected into
+> the page when Home Assistant starts, so a browser still serving the cached
+> frontend won't see it. **Hard-refresh** the page (Ctrl/Cmd+Shift+R, or clear the
+> cache in the companion app) and it should appear.
+>
+> If it still doesn't, add the two resources by hand under **Settings → Dashboards
+> → ⋮ → Resources**, as *JavaScript module*:
+> `/local/navimow_pro/navimow-scheduler-card.js` and
+> `/local/navimow_pro/navimow-mow-card.js`. That is safe to do even if the
+> automatic loading later works — the cards refuse to register themselves twice —
+> though you may then see each card listed twice in the picker.
+
 ---
 
 ## Screenshots
