@@ -5,21 +5,23 @@ LOGIN_BIND_TEST.py, SHARED_ACCOUNT_TEST.py, CONTROL_TEST_B.py). All business
 identity (uid, access_token, device_id) travels *inside* the encrypted payload,
 never in HTTP headers.
 
-The whole class is synchronous (urllib + `cryptography`). Home Assistant runs it
-off the event loop via hass.async_add_executor_job, so the CPU-bound crypto and
-blocking IO never touch the loop. A threading.Lock serialises calls (poll vs.
-control) that may run in different executor threads and share the token state.
+The whole class is synchronous (http.client + `cryptography`). Home Assistant
+runs it off the event loop via hass.async_add_executor_job, so the CPU-bound
+crypto and blocking IO never touch the loop. A threading.Lock serialises calls
+(poll vs. control) that may run in different executor threads and share the
+token state *and* the pooled connection.
 """
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 import os
+import ssl
+import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from ..const import (
@@ -33,7 +35,45 @@ from .passport import PassportAuthError, PassportError, Tokens
 
 _LOGGER = logging.getLogger(__name__)
 
-_HEADERS = {"Content-Type": "text/html", "ninebot-version": "1"}
+_HEADERS = {
+    "Content-Type": "text/html",
+    "ninebot-version": "1",
+    # Kept byte-identical to what urllib used to send. Nothing suggests the
+    # cloud gates on the User-Agent (it has always accepted a Python one), but
+    # this change is meant to alter the connection *lifecycle* and nothing else,
+    # so the request on the wire stays exactly as it was.
+    "User-Agent": "Python-urllib/%d.%d" % sys.version_info[:2],
+}
+
+_TIMEOUT = 30
+
+# A pooled keep-alive socket can be dropped by the far end at any moment, and
+# that only surfaces when we try to use it. These are the failures which mean
+# *no byte of a response ever arrived*, so re-sending on a fresh connection is
+# safe even for a write (urllib3 applies the same rule). A timeout is
+# deliberately NOT in here: the server may be slow yet still processing, and
+# re-sending a command in that case would be wrong.
+_STALE_CONN_ERRORS = (
+    http.client.BadStatusLine,  # includes RemoteDisconnected
+    http.client.ImproperConnectionState,
+    ConnectionResetError,
+    BrokenPipeError,
+)
+
+# One shared, certificate-verifying TLS context. Building it reads the CA bundle
+# from disk, so it is created lazily -- always from an executor thread, never on
+# the event loop.
+_SSL_CTX: ssl.SSLContext | None = None
+_SSL_CTX_LOCK = threading.Lock()
+
+
+def _ssl_context() -> ssl.SSLContext:
+    global _SSL_CTX  # noqa: PLW0603 - module-level singleton, guarded
+    with _SSL_CTX_LOCK:
+        if _SSL_CTX is None:
+            _SSL_CTX = ssl.create_default_context()
+        return _SSL_CTX
+
 
 CODE_OK = 1
 # Business codes that indicate an auth/session problem -> refresh + re-login.
@@ -99,6 +139,11 @@ class NavimowCloudClient:
         # first candidate.
         self._host = host or mower_hosts(self._region)[0]
         self._lock = threading.RLock()
+        # Pooled HTTPS connection (see _post). ``_conn_host`` records the host it
+        # was opened to, so a region/host change drops it instead of talking to
+        # the wrong cloud.
+        self._conn: http.client.HTTPSConnection | None = None
+        self._conn_host = ""
 
     # ------------------------------------------------------------------ state
     @property
@@ -226,21 +271,75 @@ class NavimowCloudClient:
         self.mower_login()
 
     # ------------------------------------------------------------- transport
+    def _connection(self) -> tuple[http.client.HTTPSConnection, bool]:
+        """The pooled HTTPS connection, and whether it was already open.
+
+        One connection per client, kept alive across calls. Polling makes several
+        requests back to back (and, while the mower cuts, does so every few
+        seconds), so a fresh TCP+TLS handshake per request was the dominant cost
+        of the poll loop -- and the reason the same hostname got resolved over
+        and over (GitHub issue #6).
+        """
+        if self._conn is not None and self._conn_host == self._host:
+            return self._conn, True
+        self._close_connection()  # host changed (region re-resolved) -> drop it
+        self._conn = http.client.HTTPSConnection(
+            self._host, timeout=_TIMEOUT, context=_ssl_context()
+        )
+        self._conn_host = self._host
+        return self._conn, False
+
+    def _close_connection(self) -> None:
+        """Drop the pooled connection. Never raises."""
+        conn, self._conn, self._conn_host = self._conn, None, ""
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - tearing down must not fail a call
+                pass
+
+    def close(self) -> None:
+        """Release the pooled connection (called when the config entry unloads)."""
+        with self._lock:
+            self._close_connection()
+
     def _post(self, path: str, envelope: dict) -> dict:
         data = json.dumps(envelope, separators=(",", ":")).encode()
-        req = urllib.request.Request(
-            f"https://{self._host}{path}", data=data, headers=_HEADERS, method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as err:
-            try:
-                return json.loads(err.read())
-            except Exception as inner:  # pragma: no cover - defensive
-                raise NavimowError(err.code, "HTTP error") from inner
-        except urllib.error.URLError as err:  # network problem
-            raise NavimowError("network", str(err.reason)) from err
+        # Serialised: one connection cannot carry two requests at once, and a
+        # poll and a control command can land in different executor threads.
+        # This is the same RLock _call already holds, so it re-enters happily.
+        with self._lock:
+            for _ in range(2):
+                conn, reused = self._connection()
+                try:
+                    conn.request("POST", path, body=data, headers=_HEADERS)
+                    resp = conn.getresponse()
+                    # Drain fully: an unread body makes the socket unusable.
+                    body = resp.read()
+                    if resp.will_close:
+                        self._close_connection()
+                except _STALE_CONN_ERRORS as err:
+                    self._close_connection()
+                    if reused:
+                        continue  # dead keep-alive socket -> retry once, fresh
+                    raise NavimowError("network", str(err)) from err
+                except OSError as err:  # DNS, refused, timeout, TLS failure
+                    self._close_connection()
+                    raise NavimowError("network", str(err)) from err
+                except http.client.HTTPException as err:  # truncated/garbled
+                    self._close_connection()
+                    raise NavimowError("network", str(err)) from err
+
+                try:
+                    return json.loads(body)
+                except ValueError as err:
+                    # The cloud answers *business* errors with a JSON body (and
+                    # usually a 200), so a body that isn't JSON at all means a
+                    # genuine HTTP-level failure.
+                    raise NavimowError(resp.status, "HTTP error") from err
+            # Only reachable if a reused connection died and the retry loop fell
+            # through, which the `reused` guard above already prevents.
+            raise NavimowError("network", "connection lost")
 
     def _raw(self, path: str, business: dict) -> dict:
         """Pack + POST + decode a single call, no auth handling."""
