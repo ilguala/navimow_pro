@@ -196,8 +196,11 @@ Zone encoding is handled for you (little-endian `partitionIds` + the available
   HTTP headers. The protocol constants involved are app-wide (identical for every
   user of the app), not personal secrets.
 - **Performance** — the encryption is CPU-bound and runs entirely in Home
-  Assistant's executor, so it never blocks the event loop. Polling is every 30 s,
-  and faster (~12 s) while the mower is actively mowing or returning.
+  Assistant's executor, so it never blocks the event loop. Polling is every 30 s
+  when idle, 12 s while returning to the dock, and 3 s while actively cutting
+  (dense enough to trace the mowed path for the map). All calls share **one
+  kept-alive HTTPS connection**, so a refresh costs no repeated TCP/TLS
+  handshakes — and no repeated DNS lookups for the same host.
 
 ---
 
