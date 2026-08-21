@@ -792,9 +792,28 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             except NavimowError:
                 raw["device_info"] = {}
 
+        # Which group this cycle fetches. Decided up front because auth-list
+        # below only wants refreshing on a slow one.
+        self._cycle = (self._cycle + 1) % SLOW_REFRESH_EVERY
+        slow = self._cycle == 1 or "set_list" not in raw
+
         # Fast, every cycle.
         raw["index2"] = self.client.index2(sn)
-        raw["auth_list"] = self.client.auth_list()
+        # auth-list carries the mower name and model -- both static -- plus a
+        # fallback for the state and battery, so asking for it every cycle was a
+        # wasted request (#6). Refresh it on the slow cycle, and immediately,
+        # whatever the cycle, when this firmware's index2 did NOT carry a field
+        # auth-list backstops: the fallback then stays as fresh as it ever was,
+        # and nobody loses it silently. The two conditions mirror the fallbacks
+        # in _parse exactly (falsy state, absent soc).
+        index2 = raw.get("index2") or {}
+        if (
+            slow
+            or "auth_list" not in raw
+            or not index2.get("vehicle_state")
+            or index2.get("soc") is None
+        ):
+            raw["auth_list"] = self.client.auth_list()
         try:
             raw["location"] = self.client.location(sn, vtype)
         except NavimowAuthError:
@@ -828,8 +847,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             raw["errors"] = {}
 
         # Slow, only every N cycles (or on the first successful fetch).
-        self._cycle = (self._cycle + 1) % SLOW_REFRESH_EVERY
-        if self._cycle == 1 or "set_list" not in raw:
+        if slow:
             getters = {
                 "set_list": lambda: self.client.set_list(sn),
                 "maintenance": lambda: self.client.maintenance(sn),
