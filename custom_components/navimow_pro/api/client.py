@@ -177,7 +177,7 @@ class NavimowCloudClient:
             "access_token": self._tokens.access_token,
             "refresh_token": self._tokens.refresh_token,
             "uid": self._uid,
-            "region": self._region,
+            "region": self._tokens.region or self._region,
             "host": self._host,
         }
 
@@ -238,7 +238,7 @@ class NavimowCloudClient:
             "uuid": self._tokens.uuid,
             "token": self._tokens.access_token,
             "refresh_token": self._tokens.refresh_token,
-            "region": self._region,
+            "region": self._tokens.region or self._region,
         }
         body_a = {**field4, **self._common_params(access_token="")}
         result = self._raw("/user/user/login", body_a)
