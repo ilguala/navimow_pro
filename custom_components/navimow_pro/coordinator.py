@@ -44,6 +44,8 @@ from .const import (
     DOMAIN,
     FAST_SCAN_INTERVAL,
     MOW_SCAN_INTERVAL,
+    MOW_SOON_WINDOW,
+    IDLE_SCAN_INTERVAL,
     ERROR_CODES,
     ERROR_RESUME_HINT,
     FAULT_STATE_FAMILY,
@@ -567,8 +569,11 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     }
 
 
-def _compute_next_mow(set_list: Any, now: Any) -> str | None:
-    """Next scheduled mow as a readable "Tue 04:45".
+def _compute_next_mow(set_list: Any, now: Any):
+    """Next scheduled mow as a ``datetime`` (the caller formats it).
+
+    Returned as a datetime rather than a string because the poll loop needs to
+    know how far away it is, not just how to print it.
 
     Reads the *live* plan via :func:`_schedule_source` (``workPlanV2``, NOT the
     dead legacy ``plan`` field). Each entry is ``{day:1-7 (1=Sun), open:0/1,
@@ -611,10 +616,9 @@ def _compute_next_mow(set_list: Any, now: Any) -> str | None:
             hh, mm = divmod(start * 15, 60)
             if hh > 23:
                 continue
-            when = (now + timedelta(days=offset)).replace(
+            return (now + timedelta(days=offset)).replace(
                 hour=hh, minute=mm, second=0, microsecond=0
             )
-            return when.strftime("%a %H:%M")
     return None
 
 
@@ -648,6 +652,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self.sn: str = data[CONF_VEHICLE_SN]
         self.vehicle_type: int = int(data.get(CONF_VEHICLE_TYPE, 0) or 0)
         self._cycle = 0
+        # Next scheduled mow, kept from the last parse so the poll loop can tell
+        # when to stop idling (see _poll_interval).
+        self._next_mow_at: Any = None
         self._raw_cache: dict[str, Any] = {}
         # Parsed map geometry, cached across cycles (the map rarely changes).
         self._map_geometry: dict | None = None
@@ -756,17 +763,37 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                     )
             except Exception:  # noqa: BLE001 - persistence must not break polling
                 _LOGGER.debug("trail: save failed", exc_info=True)
-        # Adaptive polling: cut-time is sampled densely (to trace the path),
-        # returning is fast, idle is conservative.
+        self.update_interval = timedelta(seconds=self._poll_interval(snapshot))
+        return snapshot
+
+    def _poll_interval(self, snapshot: dict) -> int:
+        """How long to wait before the next poll.
+
+        Cut-time is sampled densely because that is what reconstructs the mowed
+        path on the map -- the cloud never exposes the actual stripes, so the
+        trail is only as good as the sampling. Everything else is as slow as it
+        can be without the integration feeling dead:
+
+        * mowing        -- dense, the map depends on it
+        * returning     -- fast, the position still moves
+        * faulted       -- attentive, a stuck mower is what people want to see
+        * mow due soon  -- attentive, so a job's start is never missed
+        * idle in dock  -- slow; nothing changes but the battery
+        """
         code = snapshot["state_code"]
         if code == STATE_MOWING:
-            interval = MOW_SCAN_INTERVAL
-        elif code in ACTIVE_STATES:
-            interval = FAST_SCAN_INTERVAL
-        else:
-            interval = DEFAULT_SCAN_INTERVAL
-        self.update_interval = timedelta(seconds=interval)
-        return snapshot
+            return MOW_SCAN_INTERVAL
+        if code in ACTIVE_STATES:
+            return FAST_SCAN_INTERVAL
+        if snapshot.get("error") or code not in KNOWN_STATES:
+            return DEFAULT_SCAN_INTERVAL
+
+        when = self._next_mow_at
+        if when is not None:
+            due_in = (when - dt_util.now()).total_seconds()
+            if 0 <= due_in <= MOW_SOON_WINDOW:
+                return DEFAULT_SCAN_INTERVAL
+        return IDLE_SCAN_INTERVAL
 
     @property
     def raw_payloads(self) -> dict[str, Any]:
@@ -978,6 +1005,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         maintenance = raw.get("maintenance") or {}
         today_plan = raw.get("today_plan") or {}
 
+        # Kept on the instance as well as in the snapshot: the poll loop uses the
+        # distance to it to decide when to come back to the attentive rate.
+        next_mow_at = _compute_next_mow(set_list, dt_util.now())
+        self._next_mow_at = next_mow_at
+
         state_code = str(index2.get("vehicle_state") or auth.get("vehicle_state") or "")
         battery = _as_int(index2.get("soc") if index2.get("soc") is not None else auth.get("soc"))
         network_status = _as_int(index2.get("network_status"))
@@ -1127,7 +1159,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 if map_geom.get("area") is not None
                 else _as_float(_find(raw.get("device_info"), "map_area_limit"))
             ),
-            "next_mow": _compute_next_mow(set_list, dt_util.now()),
+            "next_mow": next_mow_at.strftime("%a %H:%M") if next_mow_at else None,
             # zones
             "zones": zones,
             "current_zone": current_zone,

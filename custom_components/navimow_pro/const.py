@@ -122,6 +122,13 @@ def mower_hosts(region: str | None) -> tuple[str, ...]:
 DEFAULT_SCAN_INTERVAL: Final = 30  # seconds, conservative (private API has no push)
 FAST_SCAN_INTERVAL: Final = 12  # while returning to dock
 MOW_SCAN_INTERVAL: Final = 3  # while actively cutting: dense enough to trace the path
+# Sitting in the dock, nothing changes but the battery, and slowly. Polling that
+# every 30 s was thousands of calls a day for no information -- and this is the
+# vendor's own app API, so restraint is self-preservation as much as courtesy.
+IDLE_SCAN_INTERVAL: Final = 120
+# ...but back to the attentive rate shortly before a scheduled mow, so the start
+# of a job (and the beginning of its path on the map) is never missed.
+MOW_SOON_WINDOW: Final = 900  # seconds before the next scheduled start
 # how many normal cycles between refreshing slow-changing data (settings/maint/plan)
 SLOW_REFRESH_EVERY: Final = 6
 
