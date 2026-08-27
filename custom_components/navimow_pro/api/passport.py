@@ -163,7 +163,7 @@ def lookup_region(email: str, hosts: tuple[str, ...] | None = None) -> str | Non
             continue
         code = str(j.get("resultCode"))
         if code == _RESULT_OK:
-            region = canonical_region((j.get("data") or {}).get("region"))
+            region = (j.get("data") or {}).get("region")
             _LOGGER.debug("region lookup: %s owns this account -> %s", host, region)
             return region
         if code != RESULT_ACCOUNT_NOT_EXISTS:
@@ -179,7 +179,7 @@ def _extract_tokens(data: dict) -> Tokens:
         access_token=str(data.get("access_token", "")),
         refresh_token=str(data.get("refresh_token", "")),
         uuid=str(data.get("uuid") or ""),
-        region=canonical_region(raw_region) if raw_region else "",
+        region=str(raw_region) if raw_region else "",
     )
 
 
@@ -203,8 +203,10 @@ def login(username: str, password: str, region: str | None = None) -> Tokens:
             data = j.get("data") or {}
             tokens = _extract_tokens(data)
             # Trust the region we actually authenticated against: some backends
-            # echo a stale/absent value.
-            tokens.region = canonical_region(tokens.region) or canonical_region(region)
+            # echo a stale/absent value. Keep it RAW -- the mower cloud routes
+            # the login payload on the region code the passport server reports
+            # (e.g. "ore" for US accounts), which canonicalization would lose.
+            tokens.region = tokens.region or str(region or "")
             _LOGGER.debug("passport login ok on %s: %s", host, tokens.redacted())
             return tokens
         last = PassportAuthError(code, str(j.get("resultDesc", "")))
@@ -243,6 +245,6 @@ def refresh(tokens: Tokens, region: str | None = None) -> Tokens:
     if not new.uuid:
         new.uuid = tokens.uuid
     if not new.region:
-        new.region = canonical_region(region or tokens.region)
+        new.region = tokens.region
     _LOGGER.debug("passport refresh ok: %s", new.redacted())
     return new
