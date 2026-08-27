@@ -39,6 +39,7 @@
       "account_not_found": "Ce compte n’a été trouvé sur aucun serveur Navimow. Vérifiez l’adresse ou choisissez manuellement la région du serveur ci-dessous.",
       "invalid_auth": "E-mail ou mot de passe invalide.",
       "cannot_connect": "Impossible de joindre le cloud Navimow. Réessayez.",
+      "cloud_refused": "Le cloud Navimow a répondu mais a refusé la requête (code {code}). Ce n'est pas un problème de réseau ou de région, changer de région ne servira donc à rien. Merci de signaler ce code.",
       "no_vehicles": "Aucune tondeuse n’est associée à ce compte.",
       "vehicle_not_found": "Ce numéro de série n’a pas pu être lu avec ce compte. Vérifiez le numéro de série et assurez-vous que la tondeuse est bien partagée avec ce compte.",
       "unknown": "Erreur inattendue. Consultez les journaux."

@@ -39,6 +39,7 @@
       "account_not_found": "That account was not found on any Navimow server. Check the address, or pick your server region manually below.",
       "invalid_auth": "Invalid email or password.",
       "cannot_connect": "Could not reach the Navimow cloud. Try again.",
+      "cloud_refused": "The Navimow cloud answered but refused the request (code {code}). This is not a network or region problem, so changing the region will not help. Please report that code.",
       "no_vehicles": "No mower is associated with this account.",
       "vehicle_not_found": "That serial could not be read on this account. Check the serial and that the mower is shared with this account.",
       "unknown": "Unexpected error. Check the logs."

@@ -65,6 +65,26 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Our transport tags genuine network failures with this code; anything else came
+# back from the cloud as a business code.
+_NETWORK_CODE = "network"
+
+
+def _connection_error(err: NavimowError | PassportError) -> tuple[str, dict[str, str]]:
+    """Map a failed call to an error key, telling apart "unreachable" from "refused".
+
+    Saying "could not reach the cloud" when the cloud answered and declined sends
+    people hunting through firewalls and region settings for a problem that isn't
+    there -- exactly what happened with the US login bug (#7), where five people
+    checked their network before anyone posted the actual code. When the cloud
+    answered, show ITS code: a report then starts from the real answer.
+    """
+    code = str(getattr(err, "code", "") or "")
+    if not code or code == _NETWORK_CODE:
+        return "cannot_connect", {}
+    return "cloud_refused", {"code": code}
+
+
 _USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_EMAIL): TextSelector(
@@ -183,6 +203,7 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
         if user_input is not None:
             self._email = user_input[CONF_EMAIL].strip()
             chosen = user_input.get(CONF_REGION, REGION_AUTO)
@@ -205,10 +226,10 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_auth"
             except PassportError as err:
                 _LOGGER.warning("Navimow passport error: %s", err)
-                errors["base"] = "cannot_connect"
+                errors["base"], placeholders = _connection_error(err)
             except NavimowError as err:
                 _LOGGER.warning("Navimow cloud error: %s", err)
-                errors["base"] = "cannot_connect"
+                errors["base"], placeholders = _connection_error(err)
             except Exception:  # noqa: BLE001 - surface anything unexpected safely
                 _LOGGER.exception("Unexpected error during Navimow login")
                 errors["base"] = "unknown"
@@ -235,7 +256,10 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_select_vehicle()
 
         return self.async_show_form(
-            step_id="user", data_schema=_USER_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=_USER_SCHEMA,
+            errors=errors,
+            description_placeholders=placeholders,
         )
 
     async def async_step_select_vehicle(
@@ -354,6 +378,7 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
         if user_input is not None:
             email = (user_input.get(CONF_EMAIL) or self._email or "").strip()
             self._email = email
@@ -370,7 +395,7 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except (PassportError, NavimowError) as err:
                 _LOGGER.warning("Navimow reauth error: %s", err)
-                errors["base"] = "cannot_connect"
+                errors["base"], placeholders = _connection_error(err)
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Unexpected error during Navimow reauth")
                 errors["base"] = "unknown"
@@ -404,7 +429,10 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(
-            step_id="reauth_confirm", data_schema=schema, errors=errors
+            step_id="reauth_confirm",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=placeholders,
         )
 
     # ---------------------------------------------------------------- options

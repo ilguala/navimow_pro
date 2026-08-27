@@ -39,6 +39,7 @@
       "account_not_found": "Questo account non risulta su nessun server Navimow. Controlla l'indirizzo, oppure scegli la regione del server qui sotto.",
       "invalid_auth": "Email o password non validi.",
       "cannot_connect": "Impossibile raggiungere il cloud Navimow. Riprova.",
+      "cloud_refused": "Il cloud Navimow ha risposto ma ha rifiutato la richiesta (codice {code}). Non è un problema di rete o di regione, quindi cambiare regione non serve. Segnala quel codice.",
       "no_vehicles": "Nessun robot associato a questo account.",
       "vehicle_not_found": "Non riesco a leggere quel seriale su questo account. Controlla il seriale e che il robot sia condiviso con questo account.",
       "unknown": "Errore imprevisto. Controlla i log."
