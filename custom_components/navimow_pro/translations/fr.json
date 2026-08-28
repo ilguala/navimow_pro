@@ -100,6 +100,9 @@
       "signal_wifi": {
         "name": "Signal Wi-Fi"
       },
+      "cut_height": {
+        "name": "Hauteur de coupe"
+      },
       "blades_life": {
         "name": "Durée de vie des lames"
       },

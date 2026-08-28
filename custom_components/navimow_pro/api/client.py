@@ -83,9 +83,26 @@ AUTH_ERROR_CODES = {
     401900,  # token empty
     401901,
     401902,
+    401903,  # token expired
     401905,  # incorrect user information
     1005,  # logged in from another device
 }
+
+# Everything the cloud numbers 4019xx has turned out to be about the session:
+# token empty, expired, wrong user. Listing them one at a time has now stranded
+# a user once -- 401903 was simply missing, so the session was never refreshed
+# and the integration sat in a retry loop that reloading could not clear. Treat
+# the whole family as auth, so the next gap in their numbering costs at most one
+# needless refresh instead of a dead integration.
+_AUTH_CODE_FAMILY = "4019"
+
+
+def is_auth_error(code: Any) -> bool:
+    """Whether a business code means "this session is no longer good"."""
+    if code in AUTH_ERROR_CODES:
+        return True
+    text = str(code)
+    return len(text) == 6 and text.startswith(_AUTH_CODE_FAMILY) and text.isdigit()
 
 
 class NavimowError(Exception):
@@ -382,7 +399,7 @@ class NavimowCloudClient:
             if code == CODE_OK:
                 return result.get("data")
 
-            if retry_auth and auth and code in AUTH_ERROR_CODES:
+            if retry_auth and auth and is_auth_error(code):
                 _LOGGER.debug("auth code %s on %s -> re-auth + retry", code, path)
                 self._reauth()
                 body = self._auth_body(extra)
@@ -391,7 +408,7 @@ class NavimowCloudClient:
                     return result.get("data")
 
             desc = str(result.get("desc", "")) if isinstance(result, dict) else str(result)
-            if code in AUTH_ERROR_CODES:
+            if is_auth_error(code):
                 raise NavimowAuthError(code, desc)
             raise NavimowError(code, desc)
 
