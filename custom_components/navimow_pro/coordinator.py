@@ -685,6 +685,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self.sn: str = data[CONF_VEHICLE_SN]
         self.vehicle_type: int = int(data.get(CONF_VEHICLE_TYPE, 0) or 0)
         self._cycle = 0
+        # Set after a command so the next poll also re-reads the settings group.
+        # Without it a written setting appears to bounce back: the write lands,
+        # but the entity keeps showing the cached set_list until the slow cycle
+        # comes round -- up to 12 minutes once idle polling slowed to 120 s.
+        self._force_slow = False
         # Next scheduled mow, kept from the last parse so the poll loop can tell
         # when to stop idling (see _poll_interval).
         self._next_mow_at: Any = None
@@ -855,7 +860,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Which group this cycle fetches. Decided up front because auth-list
         # below only wants refreshing on a slow one.
         self._cycle = (self._cycle + 1) % SLOW_REFRESH_EVERY
-        slow = self._cycle == 1 or "set_list" not in raw
+        slow = self._cycle == 1 or "set_list" not in raw or self._force_slow
+        self._force_slow = False
 
         # Fast, every cycle.
         raw["index2"] = self.client.index2(sn)
@@ -1366,5 +1372,10 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         """Run a client command in the executor then request a quick refresh."""
         result = await self.hass.async_add_executor_job(func, *args)
         self._persist_session()
+        # Settings live in the slow group, so a plain refresh would re-read
+        # everything EXCEPT the thing just written. Raised for motion commands
+        # too: four extra calls on a deliberate user action is a cheaper price
+        # than any caller forgetting to ask for it.
+        self._force_slow = True
         await self.async_request_refresh()
         return result
