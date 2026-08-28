@@ -52,6 +52,7 @@ from .const import (
     KNOWN_STATES,
     OPT_ZONES,
     SLOW_REFRESH_EVERY,
+    SWATH_WIDTH_M,
     STATE_FAMILY_LABELS,
     STATE_MOWING,
     TRAIL_MAX_POINTS,
@@ -567,6 +568,19 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
         "finished_area": round(tot_fin, 2),
         "zones": zones,
     }
+
+
+def _swath_width_m(device_info: Any) -> float:
+    """Cutting width in metres, from the mower when it says so.
+
+    ``mowingPathWidth`` is millimetres. Bounded before use: a nonsense value
+    would either hide the trail or paint over the whole lawn, and neither
+    failure would be obvious as a bad reading.
+    """
+    mm = _as_int(_find(device_info, "mowingPathWidth"))
+    if mm is None or not 100 <= mm <= 1000:
+        return SWATH_WIDTH_M
+    return mm / 1000.0
 
 
 def _number_limits(device_info: Any) -> dict[str, dict[str, int]]:
@@ -1233,6 +1247,10 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # charge ceiling down to 50 where it starts at 70). Absent on some
             # models -- then the descriptor's own bounds stand.
             "number_limits": _number_limits(raw.get("device_info")),
+            # The mower states its real cutting width (mm). The map's mowed trail
+            # was drawn at a guessed 0.25 m, so on a machine that cuts 0.40 m the
+            # covered ground looked far patchier than it was.
+            "swath_width_m": _swath_width_m(raw.get("device_info")),
             # raw (for entity extra attributes / debugging)
             "raw": {
                 "index2": index2,

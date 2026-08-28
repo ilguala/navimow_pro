@@ -216,7 +216,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
         # patches (this is what made the old per-line stroke-opacity look ugly).
         # Points are lightly smoothed per segment to remove GPS zig-zag.
         if len(trail) >= 2:
-            stroke_w = min(max(SWATH_WIDTH_M * scale, 6.0), 26.0)
+            swath = self.data.get("swath_width_m") or SWATH_WIDTH_M
+            stroke_w = min(max(swath * scale, 6.0), 32.0)
             break_sq = TRAIL_BREAK_M * TRAIL_BREAK_M
             segments: list[list[list[float]]] = [[]]
             prev: list[float] | None = None
