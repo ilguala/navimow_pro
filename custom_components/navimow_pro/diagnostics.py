@@ -45,7 +45,11 @@ TO_REDACT = {
 }
 
 _MAX_STR = 300  # characters kept of any single string value
-_MAX_LIST = 8  # items kept of any single list
+_MAX_LIST = 8  # items kept of a list of structures (map shapes, trail points)
+# A list of plain numbers is cheap to print and is usually the interesting
+# part -- abbreviating mowingHeightList to 8 of 11 hid the top of a mower's
+# cutting range from the very report sent to reveal it.
+_MAX_NUMBER_LIST = 64
 
 
 def _trim(value: Any, depth: int = 0) -> Any:
@@ -64,9 +68,11 @@ def _trim(value: Any, depth: int = 0) -> Any:
     if isinstance(value, dict):
         return {k: _trim(v, depth + 1) for k, v in value.items()}
     if isinstance(value, list):
-        if len(value) > _MAX_LIST:
-            head = [_trim(v, depth + 1) for v in value[:_MAX_LIST]]
-            return [*head, f"<{len(value) - _MAX_LIST} more of {len(value)} items>"]
+        numeric = all(v is None or isinstance(v, (int, float)) for v in value)
+        cap = _MAX_NUMBER_LIST if numeric else _MAX_LIST
+        if len(value) > cap:
+            head = [_trim(v, depth + 1) for v in value[:cap]]
+            return [*head, f"<{len(value) - cap} more of {len(value)} items>"]
         return [_trim(v, depth + 1) for v in value]
     return value
 
