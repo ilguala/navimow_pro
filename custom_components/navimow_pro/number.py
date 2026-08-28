@@ -144,8 +144,13 @@ class NavimowNumber(NavimowEntity, NumberEntity):
     ) -> None:
         super().__init__(coordinator, description.key)
         self.entity_description = description
-        # Prefer the mower's own list of heights over the descriptor's defaults:
-        # the allowed steps differ per model and the machine knows them.
+        # Prefer what the mower publishes about itself over the descriptor's
+        # defaults: the accepted range differs per model and the machine knows
+        # it. Static bounds stay as the fallback for models that stay silent.
+        bounds = ((coordinator.data or {}).get("number_limits") or {}).get(description.key)
+        if bounds:
+            self._attr_native_min_value = float(bounds["min"])
+            self._attr_native_max_value = float(bounds["max"])
         options = [
             int(o)
             for o in ((coordinator.data or {}).get("cut_height_options") or [])

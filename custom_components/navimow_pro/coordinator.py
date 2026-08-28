@@ -569,6 +569,25 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     }
 
 
+def _number_limits(device_info: Any) -> dict[str, dict[str, int]]:
+    """Per-setting min/max the mower publishes for itself.
+
+    ``batteryConfig`` is absent or empty on some models, and a bound is only
+    used when the mower gives both ends of it -- half a range is worse than the
+    static one, since it would silently widen the other side.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for entity_key, lo_key, hi_key in (
+        ("return_battery_level", "returnBatteryLevelMin", "returnBatteryLevelMax"),
+        ("charging_limit", "chargingLimitMin", "chargingLimitMax"),
+    ):
+        lo = _as_int(_find(device_info, lo_key))
+        hi = _as_int(_find(device_info, hi_key))
+        if lo is not None and hi is not None and lo < hi:
+            out[entity_key] = {"min": lo, "max": hi}
+    return out
+
+
 def _compute_next_mow(set_list: Any, now: Any):
     """Next scheduled mow as a ``datetime`` (the caller formats it).
 
@@ -1208,6 +1227,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 for h in (_find(raw.get("device_info"), "mowingHeightList") or [])
                 if _as_int(h) is not None
             ],
+            # Same idea for the two battery percentages: the mower publishes the
+            # range it will accept, and the values hardcoded here were wrong for
+            # it (we offered a return level up to 50 where it stops at 20, and a
+            # charge ceiling down to 50 where it starts at 70). Absent on some
+            # models -- then the descriptor's own bounds stand.
+            "number_limits": _number_limits(raw.get("device_info")),
             # raw (for entity extra attributes / debugging)
             "raw": {
                 "index2": index2,
