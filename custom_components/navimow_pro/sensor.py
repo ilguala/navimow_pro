@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfArea
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -167,20 +167,6 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("signal_wifi"),
-    ),
-    NavimowSensorDescription(
-        key="cut_height",
-        translation_key="cut_height",
-        icon="mdi:arrow-up-down",
-        native_unit_of_measurement=UnitOfLength.MILLIMETERS,
-        device_class=SensorDeviceClass.DISTANCE,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        # Read-only on purpose: the cloud key is known (set_list.height, mm) but
-        # the command that makes the mower actually apply it has never been
-        # captured, and a setting written only to the cloud gets acknowledged and
-        # then silently reverted -- proven with the schedule. Not a guess worth
-        # making on the motor that moves the blades.
-        value_fn=lambda d: (d.get("settings") or {}).get("cut_height"),
     ),
     NavimowSensorDescription(
         key="blades_life",

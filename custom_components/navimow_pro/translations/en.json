@@ -100,9 +100,6 @@
       "signal_wifi": {
         "name": "Wi-Fi signal"
       },
-      "cut_height": {
-        "name": "Cutting height"
-      },
       "blades_life": {
         "name": "Blades life"
       },
@@ -215,6 +212,9 @@
       }
     },
     "number": {
+      "cut_height": {
+        "name": "Cutting height"
+      },
       "return_battery_level": {
         "name": "Return-to-dock battery"
       },

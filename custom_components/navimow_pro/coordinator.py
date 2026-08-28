@@ -1198,6 +1198,16 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # groups
             "settings": settings,
             "maintenance": maint,
+            # What THIS mower says it can do, straight from device-info, so the
+            # cutting-height control is only built for models that have a motor
+            # for it and is bounded by the steps the machine itself offers
+            # instead of a range copied off a spec sheet.
+            "cut_height_supported": _as_int(_find(raw.get("device_info"), "isCutterHeight")) == 1,
+            "cut_height_options": [
+                h
+                for h in (_find(raw.get("device_info"), "mowingHeightList") or [])
+                if _as_int(h) is not None
+            ],
             # raw (for entity extra attributes / debugging)
             "raw": {
                 "index2": index2,

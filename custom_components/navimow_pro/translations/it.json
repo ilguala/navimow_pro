@@ -100,9 +100,6 @@
       "signal_wifi": {
         "name": "Segnale Wi-Fi"
       },
-      "cut_height": {
-        "name": "Altezza di taglio"
-      },
       "blades_life": {
         "name": "Usura lame"
       },
@@ -215,6 +212,9 @@
       }
     },
     "number": {
+      "cut_height": {
+        "name": "Altezza di taglio"
+      },
       "return_battery_level": {
         "name": "Soglia rientro batteria"
       },

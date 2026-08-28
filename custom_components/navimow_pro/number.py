@@ -24,7 +24,7 @@ from homeassistant.components.number import (
     NumberMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -47,6 +47,10 @@ class NavimowNumberDescription(NumberEntityDescription):
     write_key: str
     scale: int = 1
     cloud_hex: bool = False
+    # The two percentages were CAPTURED taking a hex string on the device
+    # channel. Cutting height was not, and the mower reports it as a decimal
+    # string ('85'), so matching the read format is the better-founded guess.
+    robot_hex: bool = True
 
 
 NUMBERS: tuple[NavimowNumberDescription, ...] = (
@@ -77,6 +81,21 @@ NUMBERS: tuple[NavimowNumberDescription, ...] = (
         write_key="chargingLimit",
     ),
     NavimowNumberDescription(
+        key="cut_height",
+        translation_key="cut_height",
+        icon="mdi:arrow-up-down",
+        entity_category=EntityCategory.CONFIG,
+        native_unit_of_measurement=UnitOfLength.MILLIMETERS,
+        # Replaced at construction by the steps the mower itself reports.
+        native_min_value=50,
+        native_max_value=100,
+        native_step=5,
+        mode=NumberMode.SLIDER,
+        value_fn=lambda s: s.get("cut_height"),
+        write_key="height",
+        robot_hex=False,
+    ),
+    NavimowNumberDescription(
         key="rain_delay_time",  # delayedPileSet: rain-delay duration, hours
         translation_key="rain_delay_time",
         icon="mdi:timer-pause",
@@ -98,11 +117,20 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: NavimowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    settings = (coordinator.data or {}).get("settings") or {}
+    data = coordinator.data or {}
+    settings = data.get("settings") or {}
+
+    def _supported(desc: NavimowNumberDescription) -> bool:
+        if desc.value_fn(settings) is None:
+            return False
+        # Plenty of mowers report a height while having only a manual knob;
+        # isCutterHeight is the machine saying it has a motor for it.
+        if desc.key == "cut_height":
+            return bool(data.get("cut_height_supported"))
+        return True
+
     async_add_entities(
-        NavimowNumber(coordinator, desc)
-        for desc in NUMBERS
-        if desc.value_fn(settings) is not None
+        NavimowNumber(coordinator, desc) for desc in NUMBERS if _supported(desc)
     )
 
 
@@ -116,6 +144,20 @@ class NavimowNumber(NavimowEntity, NumberEntity):
     ) -> None:
         super().__init__(coordinator, description.key)
         self.entity_description = description
+        # Prefer the mower's own list of heights over the descriptor's defaults:
+        # the allowed steps differ per model and the machine knows them.
+        options = [
+            int(o)
+            for o in ((coordinator.data or {}).get("cut_height_options") or [])
+            if str(o).strip().lstrip("-").isdigit()
+        ]
+        if description.key == "cut_height" and len(options) >= 2:
+            options.sort()
+            self._attr_native_min_value = float(options[0])
+            self._attr_native_max_value = float(options[-1])
+            steps = {b - a for a, b in zip(options, options[1:])}
+            self._attr_native_step = float(min(steps)) if steps else 1.0
+        self._allowed = options if description.key == "cut_height" else []
 
     @property
     def native_value(self) -> float | None:
@@ -125,6 +167,10 @@ class NavimowNumber(NavimowEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         desc = self.entity_description
         wire = int(round(value)) * desc.scale
+        # Never send a height the machine did not offer: snap to the nearest one
+        # it listed rather than trusting the slider's arithmetic.
+        if self._allowed:
+            wire = min(self._allowed, key=lambda o: abs(o - wire))
         key = desc.write_key
         # 1) device command first -- robot value is a hex string ('14'=20,
         #    '0C'=12), so the robot applies it (the cloud copy alone is reverted).
@@ -132,7 +178,7 @@ class NavimowNumber(NavimowEntity, NumberEntity):
         await self.coordinator.async_send(
             self.coordinator.client.send_setting_device,
             self._sn,
-            {key: f"{wire:02X}"},
+            {key: f"{wire:02X}" if desc.robot_hex else str(wire)},
         )
         # 2) cloud persist (iot_set): hex string for some keys, bare decimal for
         #    the percentages -- per the captured per-key encoding.
