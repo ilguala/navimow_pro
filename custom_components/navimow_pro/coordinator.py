@@ -1157,6 +1157,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "obstacle_avoid": obstacle_avoid,
             "traction": traction,
             "night_light_level": night_light_level,
+            # Long treated as write-only. Some mowers do report them (an i215
+            # reports both), and where they do the switch can show the real
+            # state instead of the "state unknown" pair of buttons.
+            "animal_protection": _as_bool(_find(set_list, "animalProtection")),
+            "night_light": _as_bool(_find(set_list, "lightSwitch")),
             "schedule_enabled": schedule_enabled,
             "cut_height": _as_int(_find(set_list, "height")),
             # set-list reports these percentages as DECIMAL (10 / 100). Only the

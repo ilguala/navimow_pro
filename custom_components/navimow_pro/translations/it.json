@@ -100,6 +100,15 @@
       "signal_wifi": {
         "name": "Segnale Wi-Fi"
       },
+      "position_x": {
+        "name": "Posizione X"
+      },
+      "position_y": {
+        "name": "Posizione Y"
+      },
+      "heading": {
+        "name": "Direzione"
+      },
       "blades_life": {
         "name": "Usura lame"
       },
@@ -137,10 +146,10 @@
         "name": "Falciatura notturna"
       },
       "rain_sensor": {
-        "name": "Sensore pioggia"
+        "name": "Sensore pioggia (sul robot)"
       },
       "rain_detection": {
-        "name": "Rilevamento pioggia"
+        "name": "Pausa automatica da sensore"
       },
       "sound": {
         "name": "Suono"
@@ -185,10 +194,10 @@
         "name": "Luce notturna"
       },
       "weather_rain": {
-        "name": "Previsioni pioggia"
+        "name": "Sospensione per meteo previsto"
       },
       "rain_delay_mode": {
-        "name": "Ritarda con pioggia"
+        "name": "Attesa prima di riprendere dopo la pioggia"
       }
     },
     "select": {

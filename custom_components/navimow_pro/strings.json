@@ -100,6 +100,15 @@
       "signal_wifi": {
         "name": "Wi-Fi signal"
       },
+      "position_x": {
+        "name": "Position X"
+      },
+      "position_y": {
+        "name": "Position Y"
+      },
+      "heading": {
+        "name": "Heading"
+      },
       "blades_life": {
         "name": "Blades life"
       },
@@ -137,10 +146,10 @@
         "name": "Night mowing"
       },
       "rain_sensor": {
-        "name": "Rain sensor"
+        "name": "Rain sensor (on the mower)"
       },
       "rain_detection": {
-        "name": "Rain detection"
+        "name": "Rain sensor auto-pause"
       },
       "sound": {
         "name": "Sound"
@@ -185,10 +194,10 @@
         "name": "Night light"
       },
       "weather_rain": {
-        "name": "Rain forecast"
+        "name": "Rain hold (weather forecast)"
       },
       "rain_delay_mode": {
-        "name": "Delay on rain"
+        "name": "Wait before resuming after rain"
       }
     },
     "select": {

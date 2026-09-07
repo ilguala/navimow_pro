@@ -207,7 +207,9 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
     ),
     # --- vision / advanced toggles (captured live 2026-07-24, one-at-a-time) --
     # save-set-data + iot_set, numeric 1/0. slam/cpt/traction are read-back;
-    # animalProtection and lightSwitch are NOT reported by the robot -> assumed
+    # animalProtection and lightSwitch ARE reported by some mowers and not by
+    # others, so ``assumed`` here means "fall back to assumed state" rather
+    # than "always assumed" -- resolved per mower at construction.
     # state, and gated on a readable sibling so other models don't get a phantom.
     NavimowSwitchDescription(
         key="efls",  # EFLS = camera-assisted positioning (slamSwitch)
@@ -244,11 +246,11 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         enabled_default=True,
     ),
     NavimowSwitchDescription(
-        key="animal_protection",  # VisionFence animal-friendly (write-only)
+        key="animal_protection",  # VisionFence animal-friendly
         translation_key="animal_protection",
         icon="mdi:paw",
         entity_category=EntityCategory.CONFIG,
-        value_fn=lambda s: None,
+        value_fn=lambda s: s.get("animal_protection"),
         write_key="animalProtection",
         iot=True,
         numeric=True,
@@ -257,11 +259,11 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         gate_key="obstacle_avoid",  # part of VisionFence
     ),
     NavimowSwitchDescription(
-        key="night_light",  # night light on/off (write-only)
+        key="night_light",  # night light on/off
         translation_key="night_light",
         icon="mdi:lightbulb-night-outline",
         entity_category=EntityCategory.CONFIG,
-        value_fn=lambda s: None,
+        value_fn=lambda s: s.get("night_light"),
         write_key="lightSwitch",
         iot=True,
         numeric=True,
@@ -333,16 +335,21 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
             if description.enabled_default is not None
             else description.proven
         )
-        # Write-only settings have no read-back: show as assumed-state and
-        # remember the last command optimistically.
-        self._attr_assumed_state = description.assumed
+        # ``assumed`` marks a setting the robot MIGHT not report. Whether it
+        # actually does differs per model -- an i215 reports both of ours, an
+        # i108 does not -- so decide from this mower's own data instead of
+        # showing everyone the two-button control that means "state unknown".
+        settings = (coordinator.data or {}).get("settings") or {}
+        self._readable = description.value_fn(settings) is not None
+        self._attr_assumed_state = description.assumed and not self._readable
         self._optimistic: bool | None = None
 
     @property
     def is_on(self) -> bool | None:
-        if self.entity_description.assumed:
+        value = self.entity_description.value_fn(self.data.get("settings") or {})
+        if value is None and self._attr_assumed_state:
             return self._optimistic
-        return self.entity_description.value_fn(self.data.get("settings") or {})
+        return value
 
     async def _write(self, on: bool) -> None:
         desc = self.entity_description
@@ -372,7 +379,7 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
                 desc.write_key,
                 on,
             )
-        if desc.assumed:
+        if self._attr_assumed_state:
             self._optimistic = on
             self.async_write_ha_state()
 

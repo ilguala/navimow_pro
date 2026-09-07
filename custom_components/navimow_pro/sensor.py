@@ -1,6 +1,7 @@
 """Sensor platform for Navimow (Private)."""
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -12,13 +13,20 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfArea
+from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
+
+
+def _heading_degrees(radians: float | None) -> float | None:
+    """Radians from the mower -> compass-friendly degrees in [0, 360)."""
+    if radians is None:
+        return None
+    return math.degrees(radians) % 360.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -167,6 +175,40 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("signal_wifi"),
+    ),
+    NavimowSensorDescription(
+        key="position_x",
+        translation_key="position_x",
+        icon="mdi:axis-x-arrow",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        # Already parsed every cycle for the map's trail; a picture cannot
+        # trigger an automation, a number can.
+        value_fn=lambda d: (d.get("position") or {}).get("x"),
+    ),
+    NavimowSensorDescription(
+        key="position_y",
+        translation_key="position_y",
+        icon="mdi:axis-y-arrow",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (d.get("position") or {}).get("y"),
+    ),
+    NavimowSensorDescription(
+        key="heading",
+        translation_key="heading",
+        icon="mdi:compass-outline",
+        native_unit_of_measurement=DEGREE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        # The mower reports radians; degrees are what templates and dashboards
+        # expect, normalised to 0-360 so the value never jumps sign mid-turn.
+        value_fn=lambda d: _heading_degrees((d.get("position") or {}).get("heading")),
     ),
     NavimowSensorDescription(
         key="blades_life",

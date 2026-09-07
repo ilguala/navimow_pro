@@ -100,6 +100,15 @@
       "signal_wifi": {
         "name": "Signal Wi-Fi"
       },
+      "position_x": {
+        "name": "Position X"
+      },
+      "position_y": {
+        "name": "Position Y"
+      },
+      "heading": {
+        "name": "Cap"
+      },
       "blades_life": {
         "name": "Durée de vie des lames"
       },
@@ -137,10 +146,10 @@
         "name": "Tonte nocturne"
       },
       "rain_sensor": {
-        "name": "Capteur de pluie"
+        "name": "Capteur de pluie (sur le robot)"
       },
       "rain_detection": {
-        "name": "Détection de pluie"
+        "name": "Pause automatique par capteur"
       },
       "sound": {
         "name": "Son de la tondeuse"
@@ -185,10 +194,10 @@
         "name": "Éclairage nocturne"
       },
       "weather_rain": {
-        "name": "Prise en compte des prévisions de pluie"
+        "name": "Suspension selon la meteo prevue"
       },
       "rain_delay_mode": {
-        "name": "Report de la tonte en cas de pluie"
+        "name": "Attente avant de reprendre apres la pluie"
       }
     },
     "select": {
