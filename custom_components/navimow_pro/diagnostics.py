@@ -15,9 +15,9 @@ attach to a public issue.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -26,6 +26,8 @@ from .coordinator import NavimowCoordinator
 
 # Anything that identifies the account, the session or the machine. Kept
 # deliberately wide: these dumps are meant to be pasted into public issues.
+# Exact key names to hide. Kept alongside the word-based rule below because a
+# couple of them ("sn", "device_id") are too short or too generic to match on.
 TO_REDACT = {
     "access_token",
     "auth_uid",
@@ -43,6 +45,47 @@ TO_REDACT = {
     "uuid",
     "vehicle_sn",
 }
+
+# Matching on exact names alone let real data through: the cloud also sends
+# ``last_latitude`` / ``last_longitude`` (a user's home, in the clear), plus
+# ``pin_code``, ``iccid`` and ``antiTheftPoint`` -- none of which were listed,
+# and all of which reached a public issue tracker in files we had called safe to
+# attach. We do not control this payload, so any rule keyed to names we have
+# already seen will keep losing to the next variant.
+#
+# The key is split into WORDS (``last_latitude`` -> last, latitude;
+# ``antiTheftPoint`` -> anti, theft, point) and hidden if any word is sensitive.
+# Words, not substrings: "mapping" contains "pin" and "map_id" contains "id",
+# and blanking those would gut the very payload these dumps exist to show.
+_SENSITIVE_WORDS = {
+    "latitude", "longitude", "lat", "lng", "lon", "gps", "coord", "coords",
+    "token", "serial", "sn", "uid", "uuid", "imei", "iccid", "msisdn", "iccids",
+    "email", "mail", "username", "password", "passwd", "pwd", "pin", "secret",
+    "theft",
+}
+
+_WORD_SPLIT = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _is_sensitive(key: Any) -> bool:
+    """Whether a payload key names something that must not be published."""
+    text = str(key)
+    if text in TO_REDACT:
+        return True
+    return any(w.lower() in _SENSITIVE_WORDS for w in _WORD_SPLIT.split(text) if w)
+
+
+def _redact(value: Any) -> Any:
+    """Recursively blank every sensitive key, whatever its nesting."""
+    if isinstance(value, dict):
+        return {
+            k: ("**REDACTED**" if _is_sensitive(k) else _redact(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return value
+
 
 _MAX_STR = 300  # characters kept of any single string value
 _MAX_LIST = 8  # items kept of a list of structures (map shapes, trail points)
@@ -87,7 +130,7 @@ async def async_get_config_entry_diagnostics(
 
     data: dict[str, Any] = {
         "entry": {
-            "data": async_redact_data(dict(entry.data), TO_REDACT),
+            "data": _redact(dict(entry.data)),
             "options": dict(entry.options),
         }
     }
@@ -101,6 +144,6 @@ async def async_get_config_entry_diagnostics(
     data["endpoints"] = {
         key: ("empty" if not value else type(value).__name__) for key, value in raw.items()
     }
-    data["raw"] = async_redact_data(_trim(raw), TO_REDACT)
-    data["snapshot"] = async_redact_data(_trim(coordinator.data or {}), TO_REDACT)
+    data["raw"] = _redact(_trim(raw))
+    data["snapshot"] = _redact(_trim(coordinator.data or {}))
     return data
