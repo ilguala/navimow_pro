@@ -148,6 +148,11 @@ STATE_IDLE_DOCKED_POST: Final = "0102"
 STATE_MOWING: Final = "0210"
 STATE_PAUSED: Final = "0211"
 STATE_RETURNING: Final = "0220"
+# The last digit says suspended-or-not, so pausing a RETURN gives 0221, not 0211
+# (reported live on an i206N). 0202 is the dock while charging -- an 02 code, yet
+# genuinely at the station, which is why the family rule below cannot stand alone.
+STATE_PAUSED_RETURNING: Final = "0221"
+STATE_DOCKED_CHARGING: Final = "0202"
 
 # HA lawn_mower activity constants (kept as plain strings to avoid import churn)
 ACTIVITY_MOWING: Final = "mowing"
@@ -161,7 +166,9 @@ VEHICLE_STATE_TO_ACTIVITY: Final[dict[str, str]] = {
     STATE_IDLE_DOCKED_POST: ACTIVITY_DOCKED,
     STATE_MOWING: ACTIVITY_MOWING,
     STATE_PAUSED: ACTIVITY_PAUSED,
+    STATE_PAUSED_RETURNING: ACTIVITY_PAUSED,
     STATE_RETURNING: ACTIVITY_RETURNING,
+    STATE_DOCKED_CHARGING: ACTIVITY_DOCKED,
 }
 
 # The state code's first byte is the family: 01 docked, 02 working, 03 stopped
@@ -174,6 +181,7 @@ STATE_FAMILY_LABELS: Final[dict[str, str]] = {
     "03": "Stopped (fault)",
 }
 FAULT_STATE_FAMILY: Final = "03"
+WORKING_STATE_FAMILY: Final = "02"
 
 KNOWN_STATES: Final = frozenset(VEHICLE_STATE_TO_ACTIVITY)
 
@@ -267,11 +275,46 @@ VEHICLE_STATE_LABELS: Final[dict[str, str]] = {
     STATE_IDLE_DOCKED_POST: "Docked (finished)",
     STATE_MOWING: "Mowing",
     STATE_PAUSED: "Paused",
+    STATE_PAUSED_RETURNING: "Paused (returning)",
     STATE_RETURNING: "Returning to dock",
+    STATE_DOCKED_CHARGING: "Charging",
 }
 
 # States considered "docked / at station".
-DOCKED_STATES: Final = {STATE_IDLE_DOCKED, STATE_IDLE_DOCKED_POST}
+DOCKED_STATES: Final = {STATE_IDLE_DOCKED, STATE_IDLE_DOCKED_POST, STATE_DOCKED_CHARGING}
+DOCKED_STATE_FAMILY: Final = "01"
+
+
+def is_docked(state_code: str) -> bool:
+    """Whether the mower is at its station.
+
+    Family-aware: an unseen 01xx is the dock by definition, so a new idle code
+    cannot repeat the hour an i206N spent charging while the "is he home?"
+    sensor answered no.
+    """
+    code = str(state_code or "")
+    return code in DOCKED_STATES or code[:2] == DOCKED_STATE_FAMILY
+
+
+def state_activity(state_code: str, mapping: dict[str, str]) -> str:
+    """Activity for a state code, falling back on the FAMILY, not on "docked".
+
+    An unmapped code used to report the mower as docked, which is not a vague
+    answer but the opposite one: a machine stopped out on the lawn was published
+    as home, and an automation waiting for "paused" never fired. The families
+    say enough to fail safely -- 02 means it is out doing something, so guess
+    mowing; 01 means the station.
+    """
+    code = str(state_code or "")
+    known = mapping.get(code)
+    if known is not None:
+        return known
+    family = code[:2]
+    if family == FAULT_STATE_FAMILY:
+        return ACTIVITY_ERROR
+    if family == WORKING_STATE_FAMILY:
+        return ACTIVITY_MOWING
+    return ACTIVITY_DOCKED
 # States where the mower is out working (used for adaptive polling).
 ACTIVE_STATES: Final = {STATE_MOWING, STATE_RETURNING}
 

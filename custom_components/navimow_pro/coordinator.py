@@ -26,7 +26,6 @@ from homeassistant.util import dt as dt_util
 from .api import NavimowAuthError, NavimowCloudClient, NavimowError, Tokens
 from .const import (
     ACTIVE_STATES,
-    ACTIVITY_DOCKED,
     ACTIVITY_ERROR,
     CONF_ACCESS_TOKEN,
     CONF_DEVICE_ID,
@@ -40,7 +39,6 @@ from .const import (
     DEFAULT_LANGUAGE,
     DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
-    DOCKED_STATES,
     DOMAIN,
     FAST_SCAN_INTERVAL,
     MOW_SCAN_INTERVAL,
@@ -48,7 +46,8 @@ from .const import (
     IDLE_SCAN_INTERVAL,
     ERROR_CODES,
     ERROR_RESUME_HINT,
-    FAULT_STATE_FAMILY,
+    is_docked,
+    state_activity,
     KNOWN_STATES,
     OPT_ZONES,
     SLOW_REFRESH_EVERY,
@@ -1087,10 +1086,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         coverage = _parse_coverage(raw.get("path_info_time"), zone_names)
         trail = self._update_trail(position, state_code)
 
-        activity = VEHICLE_STATE_TO_ACTIVITY.get(state_code, ACTIVITY_DOCKED)
-        if state_code[:2] == FAULT_STATE_FAMILY:
-            # A stopped-with-fault mower is anything but docked.
-            activity = ACTIVITY_ERROR
+        activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
         if has_error:
             activity = ACTIVITY_ERROR
 
@@ -1191,7 +1187,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "state": _state_label(state_code),
             "activity": activity,
             "online": online,
-            "docked": state_code in DOCKED_STATES,
+            "docked": is_docked(state_code),
             "error": has_error,
             "error_text": error_text,
             # progress / areas
@@ -1332,7 +1328,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         executor thread and a command-triggered refresh may overlap the poll.
         """
         with self._trail_lock:
-            if state_code == STATE_MOWING and self._prev_state_code in DOCKED_STATES:
+            if state_code == STATE_MOWING and is_docked(self._prev_state_code or ""):
                 if self._trail:
                     self._trail = []  # fresh mow (left the dock) -> new trail
                     self._trail_dirty = True
