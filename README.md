@@ -62,36 +62,15 @@ There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
 
 ---
 
-## Screenshots
+## What the map looks like
 
-<p align="center">
-  <img src="images/map.png" alt="App-style map camera" width="460"><br>
-  <em>Map camera — zones with mowed %, dashed (virtual) vs solid (ride-on) boundaries,
-  obstacles, no-mow areas, dock, the live mower and a persistent mowed-trail overlay.</em>
-</p>
+The `camera` entity draws a live map in the style of the mobile app: each zone
+with the share of it already cut, the perimeter drawn dashed where it is a
+virtual boundary and solid where it is a physical edge, obstacles and no-mow
+areas, the charging station, the mower's current position, and the mowed trail
+built up as it works. It survives restarts.
 
-<p align="center">
-  <img src="images/dashboard.png" alt="Dashboard tiles" width="900"><br>
-  <em>A dashboard built from the entities plus the bundled <code>Mow now</code> button.</em>
-</p>
-
-<p align="center">
-  <img src="images/scheduler-card.png" alt="Mowing schedule card" width="420">
-  &nbsp;
-  <img src="images/mow-card.png" alt="Mow now dialog" width="380"><br>
-  <em>Bundled cards: the weekly schedule editor and the <code>Mow now</code> dialog
-  (pick a zone, restart-from-zero vs continue).</em>
-</p>
-
-<p align="center">
-  <img src="images/controls.png" alt="Controls" width="300">
-  &nbsp;
-  <img src="images/sensors.png" alt="Sensors" width="300">
-  &nbsp;
-  <img src="images/configuration.png" alt="Configuration and diagnostics" width="300"><br>
-  <em>Auto-created entities under a single device: controls, sensors, and
-  configuration &amp; diagnostics.</em>
-</p>
+There are no screenshots here: the ones that used to be were of a real garden.
 
 ---
 
