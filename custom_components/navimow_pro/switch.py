@@ -4,12 +4,11 @@ Two write families, both via ``/vehicle/set/save-set-data``:
 
 * legacy switches (nightMow/rain/sound/power-saving) use the *plain* form with a
   zero-padded boolean string ('01'/'00');
-* "modern" MowerSettingBean toggles (child lock, lift alarm, cyclic mowing, and
+* "modern" settings toggles (child lock, lift alarm, cyclic mowing, and
   the frost/snow/storm/high-temp mow delays) use ``operation_type:"iot_set"``
   with a per-key value encoding (some keys a JSON number ``1``/``0``, others a
   string ``"1"``/``"0"``). The plain form is acked but NOT applied for these.
 
-Both write shapes and the per-key encodings were captured live from the app.
 The modern toggles are feature-detected (created only when the robot actually
 reports the key) so a different model only sees what it has.
 """
@@ -39,7 +38,7 @@ class NavimowSwitchDescription(SwitchEntityDescription):
 
     value_fn: Callable[[dict], bool | None]
     write_key: str
-    proven: bool = False
+    core: bool = False
     # "modern" settings: write via save-set-data + operation_type:iot_set.
     iot: bool = False
     # iot value encoding: True => JSON number (1/0), False => string ('1'/'0').
@@ -51,7 +50,7 @@ class NavimowSwitchDescription(SwitchEntityDescription):
     # False => string "1"/"0" (robot encoding, may differ from the cloud one).
     robot_key: str | None = None
     robot_numeric: bool = True
-    # Registry enabled-by-default; None follows ``proven``.
+    # Registry enabled-by-default; None follows ``core``.
     enabled_default: bool | None = None
     # Write-only setting (robot never reports it back): use assumed_state and
     # track the last commanded value optimistically.
@@ -64,7 +63,7 @@ class NavimowSwitchDescription(SwitchEntityDescription):
 SWITCHES: tuple[NavimowSwitchDescription, ...] = (
     # Master on/off for the weekly mowing plan (the app's schedule toggle). Off
     # keeps the plan stored but stops it running. Same key and string encoding on
-    # both channels (captured live).
+    # both channels.
     NavimowSwitchDescription(
         key="schedule_enabled",
         translation_key="schedule_enabled",
@@ -82,9 +81,9 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         icon="mdi:weather-night",
         value_fn=lambda s: s.get("night_mow"),
         write_key="nightMowSwitch",
-        proven=True,
+        core=True,
         iot=True,
-        numeric=True,  # cloud number 1/0 (captured live; app also fires s:mower)
+        numeric=True,  # cloud number 1/0 (the app also fires s:mower)
     ),
     NavimowSwitchDescription(
         key="rain_sensor",
@@ -93,7 +92,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         value_fn=lambda s: s.get("rain_sensor"),
         write_key="rainSensor",
-        proven=True,  # write verified live (flip+restore)
+        core=True,
     ),
     NavimowSwitchDescription(
         key="rain_detection",
@@ -102,7 +101,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         value_fn=lambda s: s.get("rain_detection"),
         write_key="rainDetectionSwitch",
-        proven=True,  # write verified live (flip+restore)
+        core=True,
     ),
     NavimowSwitchDescription(
         key="sound",
@@ -111,8 +110,8 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         value_fn=lambda s: s.get("sound"),
         write_key="soundSwitch",
-        proven=True,
-        iot=True,  # cloud string "1"/"0" (captured live; app also fires s:mower)
+        core=True,
+        iot=True,  # cloud string "1"/"0" (the app also fires s:mower)
     ),
     NavimowSwitchDescription(
         key="power_saving",
@@ -121,13 +120,13 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         value_fn=lambda s: s.get("power_saving"),
         write_key="lowPowerSet",
-        proven=True,
+        core=True,
         iot=True,
-        numeric=True,  # cloud number 1/0 (captured live; app also fires s:mower)
+        numeric=True,  # cloud number 1/0 (the app also fires s:mower)
     ),
-    # --- "modern" MowerSettingBean toggles -----------------------------------
+    # --- "modern" settings toggles -----------------------------------
     # Write via save-set-data + operation_type:iot_set (the plain form is acked
-    # but NOT applied for these). Per-key value encoding captured live; a restore
+    # but NOT applied for these). Per-key value encoding varies; a restore
     # batch was verified applied on the owner account. Feature-detected (created
     # only when the robot reports the key) but enabled by default once created.
     NavimowSwitchDescription(
@@ -205,7 +204,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         numeric=True,  # JSON number 1/0
         enabled_default=True,
     ),
-    # --- vision / advanced toggles (captured live 2026-07-24, one-at-a-time) --
+    # --- vision / advanced toggles ------------------------------------------
     # save-set-data + iot_set, numeric 1/0. slam/cpt/traction are read-back;
     # animalProtection and lightSwitch ARE reported by some mowers and not by
     # others, so ``assumed`` here means "fall back to assumed state" rather
@@ -240,7 +239,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         value_fn=lambda s: s.get("traction"),
         write_key="tractionControl",  # cloud key
-        robot_key="tcsSwitch",  # robot key differs (captured live)
+        robot_key="tcsSwitch",  # the robot key differs from the cloud one
         iot=True,
         numeric=True,
         enabled_default=True,
@@ -271,7 +270,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         assumed=True,
         gate_key="night_light_level",
     ),
-    # --- rain / weather-forecast zone (captured live 2026-07-24) --------------
+    # --- rain / weather-forecast zone ----------------------------------------
     # Distinct from the physical rain sensor above. All robot+cloud, number 1/0.
     NavimowSwitchDescription(
         key="weather_rain",  # weatherSwitch = master weather-forecast rain detection
@@ -300,7 +299,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
 
 def _present(desc: NavimowSwitchDescription, settings: dict) -> bool:
     """Whether to create the switch for this robot."""
-    if desc.proven:
+    if desc.core:
         return True
     if desc.gate_key is not None:  # write-only: gate on a readable sibling
         return settings.get(desc.gate_key) is not None
@@ -328,12 +327,12 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
     ) -> None:
         super().__init__(coordinator, description.key)
         self.entity_description = description
-        # Enabled-by-default: explicit override wins, else follow ``proven``
-        # (best-effort/non-proven legacy switches stay opt-in).
+        # Enabled-by-default: explicit override wins, else follow ``core``
+        # (best-effort legacy switches stay opt-in).
         self._attr_entity_registry_enabled_default = (
             description.enabled_default
             if description.enabled_default is not None
-            else description.proven
+            else description.core
         )
         # ``assumed`` marks a setting the robot MIGHT not report. Whether it
         # actually does differs per model -- an i215 reports both of ours, an

@@ -7,14 +7,13 @@
 </p>
 
 Unofficial Home Assistant custom integration for **Segway Navimow** robot mowers
-(i-series, e.g. i108). It talks to the same private mobile-app cloud the official
-app uses (`navimow-fra.ninebot.com`), so it works without the vendor's public
-Open API / developer program.
+(i- and H-series, and some X-series). It works with your own Navimow account,
+without the vendor's public Open API or developer programme.
 
 > **Disclaimer.** This is an **unofficial**, community, interoperability project.
 > It is not affiliated with, endorsed by, or supported by Segway, Ninebot, or
-> Willand. It uses the private cloud protocol at your own risk. Names, hosts and
-> protocol constants are used only for interoperability. There is no warranty:
+> Willand. Use it at your own risk. Names are used only to say which product it
+> works with. There is no warranty:
 > mowing commands move a real machine with spinning blades — use responsibly and
 > keep people and pets clear of the lawn.
 
@@ -30,7 +29,7 @@ All entities live under a single Home Assistant device (the mower).
 | `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
 | `binary_sensor` | Problem, Online, Docked | |
 | `select` | Mow zone | Stores which zone the `lawn_mower` Start button will mow (or "All zones") — it does **not** start mowing itself |
-| `switch` | Night mowing (proven), Rain sensor, Rain detection, Sound, Power saving | Non-proven toggles are opt-in / disabled by default |
+| `switch` | Night mowing, rain handling, sound, power saving, and the mower's other settings | Settings whose behaviour is unconfirmed are opt-in / disabled by default |
 | `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), obstacles / no-mow areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
 
 Motion commands (start / pause / dock) only ever fire on an explicit user
@@ -126,13 +125,10 @@ second account that the mower is _shared_ to**:
    (Settings → Devices & Services → Add Integration → *Navimow (Private)*).
 
 Home Assistant generates and persists its **own** device id, so it registers as
-a distinct, coexisting session — your phone keeps working normally (verified
-live with a shared account). Your password is **not** stored; only the
+a distinct, coexisting session — your phone keeps working normally. Your
+password is **not** stored; only the
 refresh/access tokens are kept and refreshed perpetually. If the session ever
 fully expires, Home Assistant raises a re-authentication prompt.
-
-During setup the integration performs: passport login → device registration
-(`user/user/login`) → vehicle discovery (`auth-list`).
 
 ---
 
@@ -174,74 +170,60 @@ Open the integration's **Configure** dialog to set the **zone list** used by the
 1:Front lawn,5:Back lawn
 ```
 
-The `id` is the map partition (region) id. This is needed because the full zone
-list is not reliably exposed by a documented read endpoint on all firmwares (see
-*Assumptions* below). If left blank, the integration tries to auto-discover zones
-from the map endpoints and, failing that, falls back to whatever region the mower
-currently reports.
+The `id` is the zone number as the mower knows it. This is only needed because
+the zone list is not reported reliably on every firmware. Leave it blank and the
+integration works the zones out for itself; fill it in if yours does not, or if
+you want your own names.
 
-Zone encoding is handled for you (little-endian `partitionIds` + the available
-`partitionSetup` bitmask), matching the proven protocol.
+Everything else about zones is handled for you, including the order they are
+mowed in.
 
 ---
 
 ## How it works (high level)
 
-- **Authentication** — it signs in to the vendor's account service (the same one
-  the mobile app uses) and keeps a refreshable session. No vendor developer
-  program or public API key is required; you only ever provide your own login.
-- **Mower cloud** — status and commands use the mobile app's own encrypted
-  request format, so the integration talks to the mower the same way the app
-  does. Your account identity travels inside the encrypted payload, not in plain
-  HTTP headers. The protocol constants involved are app-wide (identical for every
-  user of the app), not personal secrets.
-- **Performance** — the encryption is CPU-bound and runs entirely in Home
-  Assistant's executor, so it never blocks the event loop. All calls share **one
-  kept-alive HTTPS connection**, so a refresh costs no repeated TCP/TLS
-  handshakes — and no repeated DNS lookups for the same host.
-- **Polling** — deliberately uneven, because this is the vendor's own app cloud
-  and there is no push. Every **3 s while cutting** (that density is what
-  reconstructs the mowed path on the map), **12 s while returning to the dock**,
-  **30 s** when something is wrong or a scheduled mow is due within 15 minutes,
-  and **120 s sitting idle in the dock**, where nothing changes but the battery.
-  A command sent from Home Assistant refreshes immediately, so the slow idle rate
-  is never felt; a mow started from the *phone app* can take up to 2 minutes to
-  show up.
+- **Authentication** — you sign in with your own Navimow account and the
+  integration keeps a refreshable session. No developer programme or API key is
+  needed; the only credentials involved are yours.
+- **Performance** — the work is CPU-bound and runs entirely in Home Assistant's
+  executor, so it never blocks the event loop. All calls share **one kept-alive
+  HTTPS connection**, so a refresh costs no repeated TCP/TLS handshakes.
+- **Polling** — deliberately uneven, since there is no push. Every **3 s while
+  cutting** (that density is what reconstructs the mowed path on the map),
+  **12 s while returning to the dock**, **30 s** when something is wrong or a
+  scheduled mow is due within 15 minutes, and **120 s sitting idle in the dock**,
+  where nothing changes but the battery. A command sent from Home Assistant
+  refreshes immediately, so the slow idle rate is never felt; a mow started from
+  the *phone app* can take up to 2 minutes to show up.
 
 ---
 
-## Assumptions & limitations (TODO)
+## Limitations
 
-These are the parts that are **not** individually proven against the live device
-and are parsed/handled best-effort. They degrade gracefully (entity unavailable
-or value `unknown`) rather than crashing:
+Some things are handled best-effort and degrade gracefully — an entity goes
+unavailable or reads `unknown` rather than the integration crashing:
 
-- **Zone discovery.** Only the encoding and the mow commands are proven. The list
-  of available zones per map is not proven from a read endpoint, hence the
-  Options-based `id:name` fallback. Zone ids `1`/`5` in the reference yard are
-  examples, not hardcoded.
-- **Best-effort switches.** Only `nightMowSwitch` is a proven reversible write.
-  Rain sensor, rain detection, sound and power saving reuse the same zero-padded
-  `save-set-data` encoding with camelCase write keys inferred from the settings
-  model (`MowerSettingBean`); they are added only when discovered in `set-list`
-  and are disabled by default (opt-in).
-- **Areas / progress / next-mow.** `mowing_progress` comes from `get-location`
-  (`mowing_percentage`). Session area, weekly area, total area and the next-mow
-  time are looked up under several candidate field names and may report `unknown`
-  on firmwares that name them differently.
-- **Maintenance (blades / chassis).** Field names are firmware-specific; parsed
-  defensively from `get-component-maintenance`.
-- **Map / coverage / trail.** The map geometry (zone boundaries with per-segment
-  attributes, obstacles, no-mow areas, dock) **is** decoded from the map-detail
-  endpoint, and per-zone mowed coverage comes from `get-path-info-time`. The
-  exact per-stripe swept path (`get-path-info-data-compress`) is not accessible
-  on this firmware, so the mowed **trail** overlay is reconstructed by sampling
-  the mower's position while it cuts — persisted across restarts, best-effort.
-- **Region/host.** Fixed to the `fra` region hosts, matching the proven setup.
+- **Zone discovery.** The zone list is not reliably reported on every firmware,
+  hence the Options-based `id:name` fallback described above.
+- **Some switches are opt-in.** Where a setting's behaviour could not be
+  confirmed on a real machine, the entity is created only when the mower reports
+  the setting, and is disabled by default. Enable it if you want it.
+- **Areas, progress and next mow.** These fields are named differently across
+  firmwares, so they are looked up under several candidates and may read
+  `unknown` on a model that names them another way.
+- **Maintenance (blades / chassis).** Same story — parsed defensively.
+- **Mowed trail.** Per-zone coverage percentages come from the mower. The drawn
+  trail is reconstructed by sampling the mower's position while it cuts, since
+  the exact swept path is not available; it is persisted across restarts and is
+  an approximation.
+- **Cutting height** is read on every model that reports one, and writable on
+  models that have a motor for it. Whether a written value sticks has been
+  confirmed on some models and not others.
 
 ---
 
 ## Credits
 
-Built by porting proven, reverse-engineered protocol scripts into a clean async
-Home Assistant component. For interoperability and personal use.
+Built and maintained by one person, for interoperability and personal use, with
+bug reports, diagnostics and fixes from the people in the issue tracker — several
+of whom found things that would otherwise still be broken.

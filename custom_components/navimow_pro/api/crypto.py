@@ -1,11 +1,10 @@
 """p:101 envelope crypto for the Segway Navimow private cloud.
 
-This is a FAITHFUL port of the proven working reference implementation
-(scratchpad/p101_client.py). The constants below are app-wide values shared by
-every user of the official app -- they are NOT user secrets. Do not "improve"
-the crypto: it matches the server byte-for-byte and is proven live.
+The constants below are app-wide values, identical for every installation --
+they are not user secrets. Do not "improve" the crypto: it has to match the
+server byte for byte.
 
-Recipe (proven):
+Recipe:
     reqKey = 16 random ASCII-uppercase bytes (per request)
     k      = base64(RSA-1024 PKCS#1 v1.5 type-2 wrap of reqKey, WRAP_PUB_PEM)
     PT     = {"data": base64(business_json), keyDataOne..Four, platform:2, timeStamp}
@@ -29,7 +28,7 @@ import time
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-# App-wide (NOT user secrets) -- copied verbatim from the proven client.
+# App-wide values, not user secrets.
 SESSION_KEY = bytes.fromhex("d0db95e2b4b2eeb99af3cfb638386209")
 
 WRAP_PUB_PEM = b"""-----BEGIN PUBLIC KEY-----

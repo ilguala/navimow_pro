@@ -152,7 +152,7 @@ def _parse_zone_options(raw: str | None) -> list[dict]:
 
 
 # --------------------------------------------------------------------- map
-# Navimow weekday numbering is 1=Sun .. 7=Sat (verified live: day 3 = Tue, 6 = Fri).
+# Weekday numbering is 1=Sun .. 7=Sat.
 _WEEKDAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 
 
@@ -363,8 +363,8 @@ def _schedule_source(set_list: Any) -> Any:
 
     The current schedule lives in ``workPlanV2`` (a.k.a. ``plan_v2``). The legacy
     ``plan`` field is dead -- the app stopped maintaining it and it stays frozen
-    at an old value, so it is used only as a last resort. Verified live: editing
-    a day updates ``workPlanV2`` while ``plan`` does not move. The two accepted
+    at an old value, so it is used only as a last resort: editing a day updates
+    ``workPlanV2`` while ``plan`` does not move. The two accepted
     key spellings cover whichever the ``set-list`` response uses.
     """
     if not isinstance(set_list, dict):
@@ -479,7 +479,7 @@ def _state_code(index2: Any) -> str:
 def _collect_error_codes(obj: Any, out: list[str], depth: int = 0) -> None:
     """Pull fault codes out of whatever shape the endpoint returned.
 
-    The payload's exact layout is not documented and we have never captured one
+    The payload's exact layout is not documented and we have never seen one
     with a fault present, so rather than guess a schema this walks the structure
     and picks up anything that looks like a code. Unknown shapes simply yield
     nothing instead of raising.
@@ -1090,14 +1090,14 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         if has_error:
             activity = ACTIVITY_ERROR
 
-        # --- settings (MowerSettingBean; snake_case in set-list, camelCase in bean)
+        # --- settings (snake_case when read, camelCase when written)
         night_mow = _as_bool(_find(set_list, "night_mow_switch", "nightMowSwitch"))
         rain_sensor = _as_bool(_find(set_list, "rainSensor", "rain_sensor"))
         rain_detection = _as_bool(_find(set_list, "rainDetectionSwitch", "rain_detection_switch"))
         sound = _as_bool(_find(set_list, "soundSwitch", "sound_switch"))
         power_saving = _as_bool(_find(set_list, "lowPowerSet", "low_power_set"))
         child_lock = _as_bool(_find(set_list, "childLock", "child_lock"))
-        # "modern" MowerSettingBean toggles (write via save-set-data + iot_set;
+        # "modern" settings toggles (write via save-set-data + iot_set;
         # feature-detected downstream -- entity created only when the key is
         # actually reported, so other models only see what they have).
         lift_alarm = _as_bool(_find(set_list, "liftSwitch", "lift_switch"))
@@ -1106,17 +1106,17 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         snow_delay = _as_bool(_find(set_list, "snowSwitch", "snow_switch"))
         storm_delay = _as_bool(_find(set_list, "stormSwitch", "storm_switch"))
         high_temp_delay = _as_bool(_find(set_list, "highTempSwitch", "high_temp_switch"))
-        # vision / advanced (captured live): slamSwitch=EFLS (camera positioning),
+        # vision / advanced: slamSwitch=EFLS (camera positioning),
         # cptSwitch=obstacle avoidance, tractionControl=traction. animalProtection
         # and lightSwitch are write-only (not reported) -> no read here.
         efls = _as_bool(_find(set_list, "slamSwitch", "slam_switch"))
         obstacle_avoid = _as_bool(_find(set_list, "cptSwitch", "cpt_switch"))
         traction = _as_bool(_find(set_list, "tractionControl", "traction_control"))
         night_light_level = _as_int(_find(set_list, "nightLightLevel", "night_light_level"))
-        # Master on/off for the weekly plan (captured live: the bean's startPlan
+        # Master on/off for the weekly plan (startPlan
         # flips 1 -> 0 with the app's schedule toggle; written as a string).
         schedule_enabled = _as_bool(_find(set_list, "startPlan", "start_plan"))
-        # rain / weather-forecast zone (captured live, distinct from the physical
+        # rain / weather-forecast zone (distinct from the physical
         # rainSensor/rainDetectionSwitch above): weatherSwitch=master on/off,
         # weatherSensitivity=drizzle 0/light 1/moderate 2, delayedPileSwitch=
         # continue(0)/delay(1), delayedPileSet=delay time (wire = hours*4).

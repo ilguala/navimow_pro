@@ -1,7 +1,7 @@
 """Services for Navimow (Private).
 
 - ``navimow_pro.set_schedule`` writes one weekday's plan (enabled + one or more
-  time periods, each optionally restricted to zones) via the proven
+  time periods, each optionally restricted to zones) via the
   save-set-data format.
 - ``navimow_pro.mow`` starts mowing now: chosen zones and a ``reset`` flag
   (True = riparti da zero / clear progress, False = continua). Listing zones

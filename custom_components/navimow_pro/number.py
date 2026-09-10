@@ -1,7 +1,7 @@
 """Number platform for Navimow (Private): percentage settings.
 
-Two MowerSettingBean percentages -- the return-to-dock battery threshold and the
-charge ceiling. Asymmetric encoding (captured live):
+Two percentage settings -- the return-to-dock battery threshold and the
+charge ceiling. Asymmetric encoding:
 
 * READ:  the set-list reports them as a DECIMAL percentage (10 / 100).
 * WRITE: like every setting, sent on BOTH channels, encoded differently -- the
@@ -10,7 +10,8 @@ charge ceiling. Asymmetric encoding (captured live):
 
 Written robot-first then cloud, like the app (the cloud copy alone is reverted
 by the robot). Feature-detected: created only when the robot reports the key.
-Ranges are best-effort (the app's exact min/max wasn't captured); the robot
+Ranges fall back to conservative defaults when the mower does not state its
+own; the robot
 rejects an out-of-range value harmlessly.
 """
 from __future__ import annotations
@@ -35,7 +36,7 @@ from .entity import NavimowEntity
 
 @dataclass(frozen=True, kw_only=True)
 class NavimowNumberDescription(NumberEntityDescription):
-    """A numeric MowerSettingBean value (same key on both write channels).
+    """A numeric setting (same key on both write channels).
 
     ``value_fn`` returns the raw *wire* integer from settings; the entity shows
     ``wire / scale`` and writes ``wire = displayed * scale``. The device
@@ -47,9 +48,9 @@ class NavimowNumberDescription(NumberEntityDescription):
     write_key: str
     scale: int = 1
     cloud_hex: bool = False
-    # The two percentages were CAPTURED taking a hex string on the device
-    # channel. Cutting height was not, and the mower reports it as a decimal
-    # string ('85'), so matching the read format is the better-founded guess.
+    # The two percentages take a hex string on the device channel. Cutting
+    # height is reported as a decimal string ('85'), so it is written the way
+    # it is read.
     robot_hex: bool = True
 
 
@@ -186,7 +187,7 @@ class NavimowNumber(NavimowEntity, NumberEntity):
             {key: f"{wire:02X}" if desc.robot_hex else str(wire)},
         )
         # 2) cloud persist (iot_set): hex string for some keys, bare decimal for
-        #    the percentages -- per the captured per-key encoding.
+        #    the percentages -- per the per-key encoding.
         cloud_val = f"{wire:02X}" if desc.cloud_hex else wire
         await self.coordinator.async_send(
             self.coordinator.client.save_setting_iot,

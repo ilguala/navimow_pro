@@ -1,9 +1,7 @@
 """Synchronous client for the Segway Navimow private cloud (p:101).
 
-Ported faithfully from the proven reference scripts (p101_client.py,
-LOGIN_BIND_TEST.py, SHARED_ACCOUNT_TEST.py, CONTROL_TEST_B.py). All business
-identity (uid, access_token, device_id) travels *inside* the encrypted payload,
-never in HTTP headers.
+All business identity (uid, access_token, device_id) travels *inside* the
+encrypted payload, never in HTTP headers.
 
 The whole class is synchronous (http.client + `cryptography`). Home Assistant
 runs it off the event loop via hass.async_add_executor_job, so the CPU-bound
@@ -247,7 +245,7 @@ class NavimowCloudClient:
     def mower_login(self) -> str:
         """POST /user/user/login to register this device and obtain the uid.
 
-        Tries without the checkcode signature first (proven to work); falls back
+        Tries without the checkcode signature first; falls back
         to the signed variant if the plain one is rejected. Stores and returns
         the uid.
         """
@@ -365,9 +363,9 @@ class NavimowCloudClient:
     def _auth_body(self, extra: dict | None) -> dict:
         # Send the FULL common-parameter set the app sends on every call
         # (uid, access_token, device_id, client_ver, platform, language,
-        # systemVersion, manufacturer). Proven live: auth-list returns an EMPTY
-        # list with only the minimal 3 fields, but returns owned + shared
-        # vehicles with the full set. (checkcode/serviceTime/nonce are NOT
+        # systemVersion, manufacturer). auth-list returns an EMPTY list with
+        # only the minimal 3 fields, but returns owned + shared vehicles with
+        # the full set. (checkcode/serviceTime/nonce are NOT
         # required.) Other reads tolerate the minimal body, but sending the full
         # set matches the app and is what makes discovery work.
         body = self._common_params(access_token=self._tokens.access_token, uid=self._uid)
@@ -469,7 +467,7 @@ class NavimowCloudClient:
 
         Returns ``[{partitionId, area, finishedArea, partitionPercentage,
         startTime, endTime, endTimeAlias}, ...]`` -- the authoritative mowed
-        amount per zone (proven live; works while docked too). This is the
+        amount per zone (works while docked too). This is the
         coverage source; the swept-path geometry (get-path-info-data-compress)
         is not reachable standalone, so the trail is reconstructed from position.
         """
@@ -523,7 +521,7 @@ class NavimowCloudClient:
         )
 
     def _behavior(self, sn: str, type_int: int) -> dict:
-        # Proven: BOTH top-level string `type` AND nested int `data.type` are required.
+        # BOTH top-level string `type` AND nested int `data.type` are required.
         return self.call(
             "/vehicle/set/send",
             {
@@ -557,19 +555,18 @@ class NavimowCloudClient:
     def set_bool_setting(self, sn: str, write_key: str, on: bool) -> Any:
         """Write a boolean setting as a zero-padded string ('01'/'00').
 
-        Proven pattern for nightMowSwitch; other keys follow the same encoding
+        The pattern nightMowSwitch uses; other keys follow the same encoding
         (best-effort -- see README).
         """
         return self.save_setting(sn, {write_key: "01" if on else "00"})
 
     def save_setting_iot(self, sn: str, vehicle_type: Any, data: dict) -> Any:
-        """Write MowerSettingBean keys via save-set-data + operation_type 'iot_set'.
+        """Write settings keys via save-set-data + operation_type 'iot_set'.
 
         Required for the "modern" settings (childLock/liftSwitch/mowingCycle/
         frostSwitch/snowSwitch/stormSwitch/highTempSwitch/returnBatteryLevel/
         chargingLimit): the plain :meth:`save_setting` form is acked (code:1) but
-        NOT applied for these keys. Captured live from the app; a restore batch
-        was verified applied on the owner account.
+        NOT applied for these keys.
         """
         return self.call(
             "/vehicle/set/save-set-data",
@@ -590,14 +587,14 @@ class NavimowCloudClient:
         return self.save_setting_iot(sn, vehicle_type, {write_key: value})
 
     def send_setting_device(self, sn: str, robot_data: dict) -> Any:
-        """Push a MowerSettingBean change straight to the robot.
+        """Push a settings change straight to the robot.
 
-        Device command ``cmdCode="s:mower"`` on ``/vehicle/set/send`` (the proven
+        Device command ``cmdCode="s:mower"`` on ``/vehicle/set/send`` (the
         control endpoint, same as mow/dock), ``data`` a JSON *string* -- exactly
         the form the app fires alongside every settings write. The cloud
         (``iot_set``) copy alone is acked but the robot does NOT apply it (it
         reverts to its onboard value), so this command is what actually takes
-        effect (verified live with the schedule). The per-key value encoding
+        effect. The per-key value encoding
         differs from the cloud form and lives in the switch/select descriptions.
         Refused (5001) while the mower is running, same as the app.
         """
@@ -617,7 +614,7 @@ class NavimowCloudClient:
     def _partition_plan_hex(day: int, enabled: bool, periods: list[dict]) -> str:
         """Per-day plan encoded for the ``s:mower`` device command.
 
-        Byte layout, captured from the app for every case it covers::
+        Byte layout::
 
             01 <day> <open> <n_periods> [ <start> <end> <n_zones> <zone_id>… ]…
 
@@ -642,12 +639,12 @@ class NavimowCloudClient:
     def set_day_schedule(
         self, sn: str, vehicle_type: Any, day: int, enabled: bool, periods: list[dict]
     ) -> Any:
-        """Write one weekday's mowing plan (proven format, captured live).
+        """Write one weekday's mowing plan.
 
         ``day`` is the Navimow weekday number (1=Sun .. 7=Sat). ``periods`` is a
         list of ``{start_min, end_min, zone_ids}`` (minutes from 00:00; empty
         zone_ids => all zones). Mirrors the app: first an immediate device
-        command (``cmdCode="s:mower"`` on ``/vehicle/set/send`` -- the proven
+        command (``cmdCode="s:mower"`` on ``/vehicle/set/send`` -- the
         control endpoint the mow/dock commands use -- carrying the plan bytes
         from :meth:`_partition_plan_hex` as a JSON *string*), then the cloud
         persist (``save-set-data`` + ``operation_type="iot_set"`` with
@@ -665,7 +662,7 @@ class NavimowCloudClient:
             for p in periods
         ]
         key = f"partitionPlan{int(day) - 1}"
-        # 1) Immediate command to the robot -- /vehicle/set/send (the proven
+        # 1) Immediate command to the robot -- /vehicle/set/send (the
         #    s:mower control endpoint), data as a JSON *string*, as the app sends.
         hex_plan = self._partition_plan_hex(day, enabled, plan_periods)
         self.call(

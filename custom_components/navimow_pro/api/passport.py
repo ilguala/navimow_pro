@@ -1,6 +1,6 @@
 """Segway/Ninebot passport authentication (standalone, no phone/hooks).
 
-Faithful port of the proven reference (scratchpad/LOGIN_BIND_TEST.py and
+Passport authentication (see
 navimow_auth/scripts/passport_auth.py).
 
     sign = SHA256_hex_lower( sorted "k=v&..." join ) over the map
@@ -121,7 +121,7 @@ def _request(
     """Signed passport call against a specific regional host.
 
     The sign covers the request params, which for a GET are the query string and
-    for a POST the JSON body -- nothing else (verified live: adding any extra key
+    for a POST the JSON body -- nothing else (adding any extra key
     yields resultCode 90031 "sign invalid").
     """
     headers = _signed_headers(path, params)

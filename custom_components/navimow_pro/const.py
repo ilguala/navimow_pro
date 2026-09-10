@@ -45,7 +45,7 @@ PASSWORD_MAX_LEN: Final = 18
 #       (alias "sea")
 #
 # `ninebot.com` carries all four; `willand.com` is the older domain (it has no
-# `us`) but is the one proven in production for `fra`, so it stays first there.
+# `us`) but is the one that works for `fra`, so it stays first there.
 DEFAULT_REGION: Final = "fra"
 REGION_AUTO: Final = "auto"  # config-flow choice: detect from the account
 
@@ -320,9 +320,7 @@ ACTIVE_STATES: Final = {STATE_MOWING, STATE_RETURNING}
 
 
 # --- Mow options (`partitionSetup`) -- two hex nibbles, 0xAB ------------------
-# Captured live by diffing the plaintext s:mower command across three runs with
-# each variable isolated (app's "riparti da zero" checkbox and "Personalizza la
-# sequenza di falciatura" toggle):
+# The two nibbles carry the restart choice and the ordering choice:
 #
 #   A (high) = 1 continue (mow only the uncut area) | 2 restart (clear progress)
 #   B (low)  = 1 automatic order (the robot picks the route)
@@ -330,7 +328,7 @@ ACTIVE_STATES: Final = {STATE_MOWING, STATE_RETURNING}
 #
 # So the zone ORDER in partitionIds is only honoured when B == 2; with B == 1 the
 # robot ignores it and optimises its own route. (0x21 is the one combination not
-# captured directly -- deduced from the scheme.)
+# deduced from the scheme.)
 MOW_SETUP_CONTINUE_AUTO: Final = 0x11  # 17 - continue, robot's own order
 MOW_SETUP_CONTINUE: Final = 0x12  # 18 - continue, honour our zone order
 MOW_SETUP_RESTART_AUTO: Final = 0x21  # 33 - restart, robot's own order (deduced)
@@ -347,11 +345,11 @@ def mow_setup(*, reset: bool, ordered: bool) -> int:
     return (0x20 if reset else 0x10) | (0x02 if ordered else 0x01)
 
 
-# --- Zone / partition encoding (proven; see Navimow_PrivateAPI_Catalogo §3.2)
+# --- Zone / partition encoding ---------------------------------------------
 def encode_partition_ids(region_ids: list[int]) -> str:
     """Encode region ids as concatenated little-endian uint16 hex.
 
-    Proven: region id 1 -> "0100", 5 -> "0500", [1,5] -> "01000500".
+    Region id 1 -> "0100", 5 -> "0500", [1,5] -> "01000500".
     """
     out = []
     for rid in region_ids:
@@ -362,7 +360,7 @@ def encode_partition_ids(region_ids: list[int]) -> str:
 def decode_partition_id_list(be_hex: str) -> list[int]:
     """Decode index2.partitionIdList (big-endian uint16 hex) to region ids.
 
-    Proven: "0001" -> [1], "00010005" -> [1, 5].
+    "0001" -> [1], "00010005" -> [1, 5].
     """
     ids: list[int] = []
     if not be_hex:

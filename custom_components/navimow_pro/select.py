@@ -32,7 +32,7 @@ ALL_ZONES = "All zones"
 
 @dataclass(frozen=True, kw_only=True)
 class NavimowSelectDescription(SelectEntityDescription):
-    """A multi-value MowerSettingBean setting (numeric on the wire)."""
+    """A multi-value setting (numeric on the wire)."""
 
     value_fn: Callable[[dict], int | None]
     write_key: str
@@ -162,7 +162,7 @@ class NavimowSettingSelect(NavimowEntity, SelectEntity):
         key = self.entity_description.write_key
         # 1) device command first -- makes the robot apply it (the cloud copy
         #    alone reverts). Robot value: bare number, or a zero-padded 2-char
-        #    string per the captured per-key encoding. Refused while mowing,
+        #    string per the per-key encoding. Refused while mowing,
         #    aborts before the cloud write.
         robot_val = num if self.entity_description.robot_numeric else f"{num:02d}"
         await self.coordinator.async_send(
