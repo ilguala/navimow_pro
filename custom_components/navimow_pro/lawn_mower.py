@@ -20,6 +20,7 @@ from .const import (
     ACTIVITY_RETURNING,
     DOMAIN,
     STATE_PAUSED,
+    STATE_PAUSED_RETURNING,
     encode_partition_ids,
     mow_setup,
 )
@@ -66,10 +67,21 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         The zone select stores the choice (``coordinator.selected_zone_ids``,
         empty = all zones); this button starts it. Always "restart" mode -- the
         popup "Mow now" card is where a continue-vs-restart choice lives.
+
+        Both paused codes resume: pausing a mow gives 0211, pausing a return
+        gives 0221, and matching only 0211 meant a mower paused on its way to the
+        dock -- issue #14's mower, stopped a metre from a closed gate -- answered
+        Start by starting a whole new mow.
+
+        Tested on the state CODE and not on ``activity``, which looks equivalent
+        and is not: the coordinator overwrites activity with ERROR whenever a
+        fault is reported or still held, so an activity test cannot match in the
+        ~90 s after an owner frees the mower from an obstacle -- precisely when
+        they reach for Start. That would restart the whole lawn from zero.
         """
         client = self.coordinator.client
         sn = self._sn
-        if self.data.get("state_code") == STATE_PAUSED:
+        if self.data.get("state_code") in (STATE_PAUSED, STATE_PAUSED_RETURNING):
             await self.coordinator.async_send(client.resume, sn)
             return
 

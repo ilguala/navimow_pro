@@ -27,7 +27,10 @@ All entities live under a single Home Assistant device (the mower).
 |---|---|---|
 | `lawn_mower` | Mower | Start / Pause / Dock (+ Resume via Start when paused) |
 | `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
-| `binary_sensor` | Problem, Online, Docked | |
+| `binary_sensor` | Problem, Online, Docked | A fault is held briefly after the cloud stops reporting it, so the sensor does not flicker |
+| `number` | Cutting height, battery thresholds | Created only on mowers that report the setting; bounded by the values the machine accepts |
+| `calendar` | Mowing schedule | Read-only view of the weekly plan |
+| `device_tracker` | Mower position | The mower on Home Assistant's map, for zone and proximity automations (see below) |
 | `select` | Mow zone | Stores which zone the `lawn_mower` Start button will mow (or "All zones") — it does **not** start mowing itself |
 | `switch` | Night mowing, rain handling, sound, power saving, and the mower's other settings | Settings whose behaviour is unconfirmed are opt-in / disabled by default |
 | `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), obstacles / no-mow areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
@@ -45,8 +48,10 @@ Lovelace resource needed) — just add them from the dashboard card picker:
 - **`custom:navimow-mow-card`** — a *Mow now* button that opens a dialog to pick
   a zone (or all) and choose *restart from zero* vs *continue*.
 
-There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
-**`navimow_pro.set_schedule`** service for automations.
+There are three services for automations: **`navimow_pro.mow`** (zones +
+`reset`), **`navimow_pro.set_schedule`**, and **`navimow_pro.resume`**, which
+resumes whatever job the mower already has without choosing zones — unlike *mow*,
+it cannot discard the progress made so far.
 
 > **"Custom element not found: navimow-mow-card"?** The loader is injected into
 > the page when Home Assistant starts, so a browser still serving the cached
@@ -59,6 +64,27 @@ There is also a **`navimow_pro.mow`** service (zones + `reset`) and a
 > `/local/navimow_pro/navimow-mow-card.js`. That is safe to do even if the
 > automatic loading later works — the cards refuse to register themselves twice —
 > though you may then see each card listed twice in the picker.
+
+---
+
+## The mower on the Home Assistant map
+
+`device_tracker` publishes the mower's real-world position, which is what makes
+*"tell me if he leaves the property"* a single zone automation instead of a
+template over the position sensors.
+
+Worth knowing before you rely on it:
+
+- The coordinates are **entity attributes**, so they land in your recorder
+  database and therefore in your backups. On a dashboard the entity normally
+  reads `Home`, not a number — only a map card or Developer Tools shows the
+  position itself. If you would rather keep only the local `position_x` /
+  `position_y` sensors, disable `device_tracker` in the entity list.
+- A mower that has never had a GPS fix reports 0/0, which is a real place in the
+  Gulf of Guinea. Those coordinates are refused, so the entity reads unknown
+  instead of putting the marker off the coast of Africa.
+- Nothing extra is fetched for this. It is the position the cloud already sends
+  on every poll.
 
 ---
 
@@ -198,6 +224,13 @@ unavailable or reads `unknown` rather than the integration crashing:
 - **Cutting height** is read on every model that reports one, and writable on
   models that have a motor for it. Whether a written value sticks has been
   confirmed on some models and not others.
+- **Zone ids in services.** `mow` and `set_schedule` refuse zone ids the decoded
+  map does not contain — but only once the map has actually decoded. On a
+  firmware whose map never arrives, nothing is checked, because refusing a
+  command there would turn our gap into your error.
+- **GPS position.** Whether the cloud reports a live fix or a fixed reference
+  point is not something the integration can tell apart. If the marker never
+  moves while the mower is cutting, that is the cloud, not the entity.
 
 ---
 

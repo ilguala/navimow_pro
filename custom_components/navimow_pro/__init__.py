@@ -28,6 +28,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.CAMERA,
     Platform.CALENDAR,
+    Platform.DEVICE_TRACKER,
 ]
 
 # Frontend cards served + auto-loaded so users don't have to add a Lovelace

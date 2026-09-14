@@ -3,6 +3,10 @@
 - ``navimow_pro.set_schedule`` writes one weekday's plan (enabled + one or more
   time periods, each optionally restricted to zones) via the
   save-set-data format.
+- ``navimow_pro.resume`` resumes the job the mower already has, without
+  choosing zones and without a reset flag -- the one call that cannot throw away
+  progress. The Start button does this too when the mower is paused, but only a
+  service can be reached from an automation.
 - ``navimow_pro.mow`` starts mowing now: chosen zones and a ``reset`` flag
   (True = riparti da zero / clear progress, False = continua). Listing zones
   explicitly also fixes the ORDER they are mowed in (like the app's "Personalizza
@@ -27,6 +31,7 @@ from .const import (
 
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_MOW = "mow"
+SERVICE_RESUME = "resume"
 
 # Navimow weekday numbering is 1=Sun .. 7=Sat.
 _WEEKDAY_TO_NUM = {
@@ -65,6 +70,64 @@ MOW_SCHEMA = vol.Schema(
         vol.Optional("reset", default=True): cv.boolean,
     }
 )
+
+
+RESUME_SCHEMA = vol.Schema({vol.Optional("device_id"): cv.string})
+
+
+def _check_zones(coordinator, zone_ids: list[int]) -> None:
+    """Refuse zone ids this mower's map does not contain.
+
+    Checked against the DECODED MAP only, never against ``snapshot["zones"]``.
+    That list is a three-tier fallback: real map geometry, then the hand-typed
+    Options id:name string, then -- last resort -- just the partitions of the job
+    currently selected. The lower two tiers are non-empty but partial by
+    construction, so trusting them would refuse zone ids that genuinely exist and
+    turn our failure to read the map into the user's error. ``snapshot["map"]``
+    is None until the geometry really decoded, which is the honest test.
+    """
+    known = {
+        z["id"]
+        for z in ((coordinator.data or {}).get("map") or {}).get("zones") or []
+        if z.get("id") is not None
+    }
+    if not known:
+        return
+    unknown = sorted({int(z) for z in zone_ids} - known)
+    if unknown:
+        raise ServiceValidationError(
+            f"Unknown zone id(s): {', '.join(str(u) for u in unknown)}. "
+            f"This mower reports {', '.join(str(k) for k in sorted(known))}."
+        )
+
+
+def _check_periods(periods: list[dict]) -> None:
+    """A day's periods must each be forward in time, and must not overlap.
+
+    The mower accepts an overlapping or reversed plan without complaint and then
+    behaves in a way nobody can predict from what they typed, so the refusal has
+    to happen here.
+    """
+    for period in periods:
+        if period["end_min"] <= period["start_min"]:
+            raise ServiceValidationError(
+                f"A period ending at {_min_to_hhmm(period['end_min'])} cannot start "
+                f"at {_min_to_hhmm(period['start_min'])}."
+            )
+    ordered = sorted(periods, key=lambda p: p["start_min"])
+    for first, second in zip(ordered, ordered[1:]):
+        if second["start_min"] < first["end_min"]:
+            raise ServiceValidationError(
+                f"Periods overlap: {_min_to_hhmm(first['start_min'])}-"
+                f"{_min_to_hhmm(first['end_min'])} and "
+                f"{_min_to_hhmm(second['start_min'])}-"
+                f"{_min_to_hhmm(second['end_min'])}."
+            )
+
+
+def _min_to_hhmm(minutes: int) -> str:
+    """Minutes from midnight back to 'HH:MM', for error messages."""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def _hhmm_to_min(value: str) -> int:
@@ -125,13 +188,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
             # An end of "00:00" means end-of-day (24:00 = slot 96), never 0.
             if end_min == 0:
                 end_min = 1440
+            zone_ids = [int(z) for z in p.get("zones") or []]
+            _check_zones(coordinator, zone_ids)
             periods.append(
                 {
                     "start_min": start_min,
                     "end_min": end_min,
-                    "zone_ids": list(p.get("zones") or []),
+                    "zone_ids": zone_ids,
                 }
             )
+        # Only when the day is being switched ON. A plan created in the Segway
+        # app can legitimately overlap, and refusing to validate it would leave
+        # the owner unable to turn that day OFF -- the card posts the stored
+        # periods back verbatim even for a disabled day.
+        if enabled:
+            _check_periods(periods)
         try:
             await coordinator.async_send(
                 coordinator.client.set_day_schedule,
@@ -150,6 +221,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # An explicit list means "mow these, in this order"; omitting it means
         # "all zones, no preference" -> let the robot route itself (see mow_setup).
         ordered = bool(zones)
+        _check_zones(coordinator, zones)
         if not zones:
             # All available zones (from the current snapshot).
             zones = [
@@ -174,7 +246,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as err:  # noqa: BLE001 - surface a clean error to the UI
             raise HomeAssistantError(f"Navimow mow failed: {err}") from err
 
+    async def _resume(call: ServiceCall) -> None:
+        # Deliberately unconditional. The mower is the authority on whether it
+        # has something to resume, and refusing here on a state code we polled up
+        # to two minutes ago would invent a failure the machine never reported.
+        coordinator = _resolve_coordinator(call)
+        try:
+            await coordinator.async_send(coordinator.client.resume, coordinator.sn)
+        except Exception as err:  # noqa: BLE001 - surface a clean error to the UI
+            raise HomeAssistantError(f"Navimow resume failed: {err}") from err
+
     hass.services.async_register(
         DOMAIN, SERVICE_SET_SCHEDULE, _set_schedule, schema=SET_SCHEDULE_SCHEMA
     )
     hass.services.async_register(DOMAIN, SERVICE_MOW, _mow, schema=MOW_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_RESUME, _resume, schema=RESUME_SCHEMA)

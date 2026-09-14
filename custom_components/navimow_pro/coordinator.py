@@ -44,6 +44,7 @@ from .const import (
     MOW_SCAN_INTERVAL,
     MOW_SOON_WINDOW,
     IDLE_SCAN_INTERVAL,
+    ERROR_CLEAR_POLLS,
     ERROR_CODES,
     ERROR_RESUME_HINT,
     is_docked,
@@ -501,12 +502,16 @@ def _collect_error_codes(obj: Any, out: list[str], depth: int = 0) -> None:
             _collect_error_codes(item, out, depth + 1)
 
 
-def _parse_errors(payload: Any, inline: Any) -> tuple[bool, str | None]:
-    """(has_fault, human text) from the fault endpoint, falling back to index2.
+def _parse_errors(payload: Any, inline: Any) -> tuple[bool, str | None, list[str]]:
+    """(has_fault, human text, codes) from the fault endpoint, falling back to index2.
 
     Codes are translated through our own ERROR_CODES descriptions; anything we do
     not recognise is still surfaced as "Fault <code>" rather than swallowed, so a
     stopped mower is never silent.
+
+    The raw codes come back alongside the prose so the sensor can publish them as
+    attributes: an automation should be able to match on a number rather than on
+    an English sentence that a translation or a reworded description would break.
     """
     codes: list[str] = []
     _collect_error_codes(payload, codes)
@@ -517,13 +522,13 @@ def _parse_errors(payload: Any, inline: Any) -> tuple[bool, str | None]:
         if isinstance(inline, list) and inline and isinstance(inline[0], dict):
             desc = inline[0].get("desc") or inline[0].get("message")
             if desc:
-                return True, str(desc)
-        return False, None
+                return True, str(desc), []
+        return False, None, []
     parts = [ERROR_CODES.get(c, f"Fault {c}") for c in codes[:3]]
     text = "; ".join(parts)
     if any(c in ERROR_CODES for c in codes):
         text = f"{text} ({ERROR_RESUME_HINT})"
-    return True, text
+    return True, text, codes
 
 
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
@@ -708,11 +713,44 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._trail_store: Store = trail_store(hass, entry.entry_id)
         self._trail_dirty = False
         self._last_trail_save = 0.0  # time.monotonic() of the last real write
+        # A fault, and how many polls in a row have since reported nothing. The
+        # fault is held over a short run of quiet polls (see _hold_error).
+        self._error_held: tuple[str | None, list[str]] | None = None
+        self._error_quiet_polls = 0
         # User's pending zone choice for the native lawn_mower "mow" button.
         # The zone select only STORES this (does not start); the mower's
         # start_mowing reads it. Empty list = all zones. In-memory (resets on
         # restart to "all").
         self.selected_zone_ids: list[int] = []
+
+    def _hold_error(
+        self, has_error: bool, text: str | None, codes: list[str]
+    ) -> tuple[bool, str | None, list[str]]:
+        """Keep a reported fault alive across a short run of quiet polls.
+
+        The fault endpoint does not always repeat itself while the mower is still
+        stopped, so believing the first empty answer made the Problem sensor drop
+        and come back -- an automation waiting on it fired twice for one fault.
+
+        Deliberately a debounce and not a permanent latch: this runs on data we
+        cannot re-check, and a Problem sensor stuck on for a fault that really did
+        clear is its own kind of wrong. A genuine clear is reported a few seconds
+        later than before; a flap is not reported at all.
+        """
+        if has_error:
+            self._error_held = (text, codes)
+            self._error_quiet_polls = 0
+            return True, text, codes
+        held = self._error_held
+        if held is None:
+            return False, None, []
+        self._error_quiet_polls += 1
+        if self._error_quiet_polls < ERROR_CLEAR_POLLS:
+            held_text, held_codes = held
+            return True, held_text, held_codes
+        self._error_held = None
+        self._error_quiet_polls = 0
+        return False, None, []
 
     async def async_load_trail(self) -> None:
         """Restore the persisted mowed trail (call before the first refresh).
@@ -1056,7 +1094,14 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Error detection from index2's inline error array (the hint-error
         # endpoint returns a compressed blob we intentionally do not decode).
         error_list = index2.get("error_data") or _find(index2, "errorData", "error_list") or []
-        has_error, error_text = _parse_errors(raw.get("errors"), error_list)
+        # Two flags on purpose. The HELD one drives the Problem sensor, so a
+        # fault that stutters does not flap it. The RAW one drives activity: a
+        # mower that has genuinely recovered should read mowing again at once,
+        # not stay stuck on Error for the length of the debounce.
+        raw_error, raw_text, raw_codes = _parse_errors(raw.get("errors"), error_list)
+        has_error, error_text, error_codes = self._hold_error(
+            raw_error, raw_text, raw_codes
+        )
 
         # index2.partitionIdList (big-endian) is the zone SELECTION for the job,
         # not where the mower is now: mowing "all zones" lists every one of them.
@@ -1087,7 +1132,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         trail = self._update_trail(position, state_code)
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
-        if has_error:
+        if raw_error:
             activity = ACTIVITY_ERROR
 
         # --- settings (snake_case when read, camelCase when written)
@@ -1190,6 +1235,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "docked": is_docked(state_code),
             "error": has_error,
             "error_text": error_text,
+            # Raw codes, so an automation can match a number instead of prose.
+            "error_codes": error_codes,
             # progress / areas
             "mowing_progress": _as_int(_find(location, "mowing_percentage", "mowingPercentage", "progress")),
             "session_area": _as_float(location.get("subtotal_area")),
@@ -1215,8 +1262,14 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "signal_4g": _as_int(index2.get("network_signal_4G") or auth.get("network_signal_4G")),
             "network_type": _as_int(index2.get("networkType") or auth.get("networkType")),
             # location / map
-            "latitude": _as_float(_find(location, "latitude", "lat")),
-            "longitude": _as_float(_find(location, "longitude", "lng", "lon")),
+            # last_latitude/last_longitude are the ONLY coordinate names this
+            # repository has ever seen in a real payload (two user diagnostics,
+            # b118344). _find takes the first exact match at a level, so the
+            # unprefixed names still win wherever they exist.
+            "latitude": _as_float(_find(location, "latitude", "lat", "last_latitude")),
+            "longitude": _as_float(
+                _find(location, "longitude", "lng", "lon", "last_longitude")
+            ),
             "position": position,
             "path": self._parse_path(location),
             # per-zone coverage (%) + reconstructed mowed trail ([[x,y],...])

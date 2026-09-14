@@ -74,3 +74,18 @@ mow:
       default: true
       selector:
         boolean:
+
+resume:
+  name: Resume
+  description: >-
+    Resume the job the mower already has, without choosing zones and without
+    restarting it. Unlike "Mow now" this cannot clear the progress made so far,
+    which makes it the safe call to put in an automation that reacts to a pause.
+  fields:
+    device_id:
+      name: Mower
+      description: Target mower (only required if more than one is configured).
+      required: false
+      selector:
+        device:
+          integration: navimow_pro

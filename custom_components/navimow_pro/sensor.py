@@ -166,7 +166,15 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         translation_key="error_text",
         icon="mdi:alert-circle",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: d.get("error_text"),
+        # "No errors" rather than unknown: a blank state reads as "the integration
+        # has no idea", which is the opposite of what it knows here. Guarded by
+        # availability, so this is never claimed before the first poll lands.
+        value_fn=lambda d: d.get("error_text") or "No errors",
+        attrs_fn=lambda d: {
+            "codes": d.get("error_codes") or [],
+            "code": next(iter(d.get("error_codes") or []), None),
+            "state_code": d.get("state_code"),
+        },
     ),
     NavimowSensorDescription(
         key="signal_wifi",

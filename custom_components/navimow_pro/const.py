@@ -131,6 +131,12 @@ IDLE_SCAN_INTERVAL: Final = 120
 MOW_SOON_WINDOW: Final = 900  # seconds before the next scheduled start
 # how many normal cycles between refreshing slow-changing data (settings/maint/plan)
 SLOW_REFRESH_EVERY: Final = 6
+# How many consecutive quiet polls before a reported fault is believed to be over.
+# The fault endpoint intermittently answers with nothing while the mower is still
+# stopped, and taking that at face value made binary_sensor.problem flick off and
+# straight back on -- firing every automation watching it, twice. A fault holds
+# the attentive 30 s rate, so this is roughly a minute and a half of quiet.
+ERROR_CLEAR_POLLS: Final = 3
 
 # --- Coverage / mowed-trail overlay ----------------------------------------
 # We reconstruct the mowed area exactly like the app does: by sampling the
