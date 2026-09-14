@@ -68,11 +68,27 @@ MOW_SCHEMA = vol.Schema(
 
 
 def _hhmm_to_min(value: str) -> int:
+    """``'HH:MM'`` -> minutes from midnight, on the mower's 15-minute grid.
+
+    The weekly plan travels as 15-minute slot indices (``start_min // 15`` in
+    :mod:`.api.client`), so a time off the grid is silently rounded down -- and a
+    short period can collapse to zero length, since 09:47 and 09:52 are both
+    slot 39. Refuse it here instead. The scheduler card already snaps to the
+    grid, so this only ever fires for a service call written by hand.
+    """
     parts = str(value).strip().split(":")
-    h = int(parts[0])
-    m = int(parts[1]) if len(parts) > 1 else 0
+    try:
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+    except ValueError:
+        raise ServiceValidationError(f"Invalid time '{value}' (use HH:MM)") from None
     if not (0 <= h <= 23 and 0 <= m <= 59):
         raise ServiceValidationError(f"Invalid time '{value}' (use HH:MM)")
+    if m % 15:
+        raise ServiceValidationError(
+            f"Invalid time '{value}': the mower keeps the weekly plan in "
+            "15-minute slots, so minutes must be 00, 15, 30 or 45"
+        )
     return h * 60 + m
 
 

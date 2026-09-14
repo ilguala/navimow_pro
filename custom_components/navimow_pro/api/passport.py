@@ -153,7 +153,13 @@ def lookup_region(email: str, hosts: tuple[str, ...] | None = None) -> str | Non
     never offered to a server that does not own the account. Each region keeps its
     own directory: the wrong one answers ``00002 account not exists``, so the owner
     is found by asking each in turn (a closed set of four).
+
+    Fails CLOSED: when not a single directory could be reached, raise instead of
+    returning ``None``. "Nobody answered" is not the same answer as "nobody claims
+    this account", and only the second one may be turned into a guess -- otherwise
+    one network blip sends the password to the wrong region's server.
     """
+    answered = False
     for host in hosts or ALL_PASSPORT_HOSTS:
         params = {"account": email, "device": DEVICE}
         try:
@@ -161,6 +167,7 @@ def lookup_region(email: str, hosts: tuple[str, ...] | None = None) -> str | Non
         except (PassportError, OSError) as err:
             _LOGGER.debug("region lookup on %s failed: %s", host, err)
             continue
+        answered = True
         code = str(j.get("resultCode"))
         if code == _RESULT_OK:
             region = (j.get("data") or {}).get("region")
@@ -168,6 +175,12 @@ def lookup_region(email: str, hosts: tuple[str, ...] | None = None) -> str | Non
             return region
         if code != RESULT_ACCOUNT_NOT_EXISTS:
             _LOGGER.debug("region lookup on %s: %s %s", host, code, j.get("resultDesc"))
+    if not answered:
+        # "network" is the code config_flow maps to cannot_connect, so the user is
+        # told to check the connection -- and can still pin the region by hand.
+        raise PassportError(
+            "network", "no passport directory answered; account region unknown"
+        )
     return None
 
 
@@ -192,6 +205,10 @@ def login(username: str, password: str, region: str | None = None) -> Tokens:
     """
     discovered = False
     if not region:
+        # lookup_region now raises when no directory answered, so a network blip
+        # can no longer send the password to a guessed host. ``or DEFAULT_REGION``
+        # therefore only covers "every directory answered, none claims it", where
+        # the login below returns a clean 00002 rather than a silent wrong guess.
         region = lookup_region(username) or DEFAULT_REGION
         discovered = True
     params = {"username": username, "password": password, "device": DEVICE}
@@ -218,7 +235,12 @@ def login(username: str, password: str, region: str | None = None) -> Tokens:
     # The account is on none of that region's servers. A pinned region can simply
     # be the wrong guess, so fall back to asking every server who owns it.
     if not discovered:
-        found = lookup_region(username)
+        try:
+            found = lookup_region(username)
+        except PassportError:
+            # An unreachable directory here must not mask the refusal the cloud
+            # just gave us; fall through and raise that instead.
+            found = None
         if found and canonical_region(found) != canonical_region(region):
             _LOGGER.warning(
                 "account is not on region %s; retrying on %s", region, found
@@ -234,17 +256,28 @@ def refresh(tokens: Tokens, region: str | None = None) -> Tokens:
         "refresh_token": tokens.refresh_token,
         "device": DEVICE,
     }
-    host = passport_hosts(region or tokens.region)[0]
-    j = _post("/v3/user/refresh", params, host)
-    code = str(j.get("resultCode"))
-    if code != _RESULT_OK:
-        raise PassportAuthError(code, str(j.get("resultDesc", "")))
-    data = j.get("data") or {}
-    new = _extract_tokens(data)
-    # Some backends omit uuid/region on refresh -> keep the previous values.
-    if not new.uuid:
-        new.uuid = tokens.uuid
-    if not new.region:
-        new.region = tokens.region
-    _LOGGER.debug("passport refresh ok: %s", new.redacted())
-    return new
+    # Try every host of the region, as login does: one dead endpoint must not
+    # cost a re-authentication prompt while the session itself is still good.
+    # A host that ANSWERED and refused is final -- only an unreachable one is
+    # worth moving on from.
+    unreachable: Exception | None = None
+    for host in passport_hosts(region or tokens.region):
+        try:
+            j = _post("/v3/user/refresh", params, host)
+        except (PassportError, OSError) as err:
+            _LOGGER.debug("passport refresh on %s failed: %s", host, err)
+            unreachable = err
+            continue
+        code = str(j.get("resultCode"))
+        if code != _RESULT_OK:
+            raise PassportAuthError(code, str(j.get("resultDesc", "")))
+        data = j.get("data") or {}
+        new = _extract_tokens(data)
+        # Some backends omit uuid/region on refresh -> keep the previous values.
+        if not new.uuid:
+            new.uuid = tokens.uuid
+        if not new.region:
+            new.region = tokens.region
+        _LOGGER.debug("passport refresh ok on %s: %s", host, new.redacted())
+        return new
+    raise PassportError("network", f"no passport host could be reached ({unreachable})")
