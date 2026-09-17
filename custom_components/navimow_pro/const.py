@@ -131,6 +131,12 @@ IDLE_SCAN_INTERVAL: Final = 120
 MOW_SOON_WINDOW: Final = 900  # seconds before the next scheduled start
 # how many normal cycles between refreshing slow-changing data (settings/maint/plan)
 SLOW_REFRESH_EVERY: Final = 6
+# How many polls to wait for the mower's own progress before deciding whether a
+# mow that has just left the dock is a new job or the continuation of one (#15).
+# At the 3 s cutting rate this is a few seconds; if the mower never reports, the
+# decision falls back to "new job", which is what every earlier version did.
+TRAIL_DECIDE_POLLS: Final = 5
+
 # How many consecutive quiet polls before a reported fault is believed to be over.
 # The fault endpoint intermittently answers with nothing while the mower is still
 # stopped, and taking that at face value made binary_sensor.problem flick off and

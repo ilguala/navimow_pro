@@ -46,6 +46,7 @@ from .const import (
     IDLE_SCAN_INTERVAL,
     ERROR_CLEAR_POLLS,
     ERROR_CODES,
+    TRAIL_DECIDE_POLLS,
     ERROR_RESUME_HINT,
     is_docked,
     state_activity,
@@ -708,6 +709,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._trail: list[list[float]] = []
         self._trail_lock = threading.Lock()
         self._prev_state_code: str | None = None
+        # Leaving the dock no longer decides the trail on its own (#15). These
+        # hold the question open until the mower reports its own progress:
+        # how many polls we still allow for an answer, and where the trail stood
+        # when it left, so a genuinely new job keeps the points sampled since.
+        self._trail_decide_polls = 0
+        self._trail_mark = 0
         # Persist the trail across restarts (loaded in async_load_trail, saved
         # debounced from _async_update_data only when _trail_dirty is set).
         self._trail_store: Store = trail_store(hass, entry.entry_id)
@@ -1129,7 +1136,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Coverage (per-zone %) + reconstructed mowed trail (accumulated position).
         position = self._parse_position(location)
         coverage = _parse_coverage(raw.get("path_info_time"), zone_names)
-        trail = self._update_trail(position, state_code)
+        trail = self._update_trail(position, state_code, active_pct)
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
         if raw_error:
@@ -1368,12 +1375,30 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         return result
 
     def _update_trail(
-        self, position: dict | None, state_code: str
+        self,
+        position: dict | None,
+        state_code: str,
+        zone_progress: float | None = None,
     ) -> list[list[float]]:
         """Accumulate the mowed path from position samples (see SWATH constants).
 
-        A new mowing session -- entering STATE_MOWING from a docked/idle state --
-        clears the trail (deterministic, independent of cloud coverage timing).
+        Leaving the dock to mow is NOT by itself a new session. A rain hold sends
+        the mower home mid-zone, and pressing Mow afterwards continues where it
+        stopped -- clearing the trail there threw away everything already cut and
+        redrew the map from the resume point (#15), while the phone app showed
+        the whole zone because it renders the mower's coverage instead of a
+        reconstruction.
+
+        What separates the two is the mower's own progress in the zone it is
+        working: 0 on a job starting over, non-zero on one being picked up. That
+        number can lag the state change by a poll or two, so the question is held
+        open for TRAIL_DECIDE_POLLS rather than answered immediately with
+        whatever happens to be there -- deciding early on a missing value is
+        exactly how the old rule got it wrong. If no answer arrives in that
+        window, it falls back to "new job", the behaviour of every earlier
+        version. On a genuinely new job the points sampled while waiting are
+        kept, so nothing is lost by having asked.
+
         Pause/resume does NOT reset (paused is not a docked state). While cutting,
         the current position is appended if it moved at least TRAIL_MIN_STEP_M
         (drops jitter). The trail persists after docking so the finished pattern
@@ -1382,10 +1407,24 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         """
         with self._trail_lock:
             if state_code == STATE_MOWING and is_docked(self._prev_state_code or ""):
-                if self._trail:
-                    self._trail = []  # fresh mow (left the dock) -> new trail
-                    self._trail_dirty = True
+                self._trail_decide_polls = TRAIL_DECIDE_POLLS
+                self._trail_mark = len(self._trail)
             self._prev_state_code = state_code
+
+            if self._trail_decide_polls:
+                if state_code != STATE_MOWING:
+                    # Back to the dock before it told us anything: no new session
+                    # to judge, so leave the trail as it is.
+                    self._trail_decide_polls = 0
+                else:
+                    self._trail_decide_polls -= 1
+                    starting_over = not zone_progress
+                    if zone_progress is not None or not self._trail_decide_polls:
+                        if starting_over and self._trail_mark:
+                            # Keep only what this session has drawn so far.
+                            self._trail = self._trail[self._trail_mark :]
+                            self._trail_dirty = True
+                        self._trail_decide_polls = 0
 
             if state_code == STATE_MOWING and position:
                 x, y = position.get("x"), position.get("y")
