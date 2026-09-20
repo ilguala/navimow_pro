@@ -237,11 +237,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         partition_ids = encode_partition_ids(zones)
         partition_setup = mow_setup(reset=call.data["reset"], ordered=ordered)
         try:
-            await coordinator.async_send_confirmed(
-                coordinator.client.mow_zones,
-                coordinator.sn,
+            await coordinator.async_start_mow(
                 partition_ids,
                 partition_setup,
+                zone_subset=bool(call.data.get("zones")),
             )
         except Exception as err:  # noqa: BLE001 - surface a clean error to the UI
             raise HomeAssistantError(f"Navimow mow failed: {err}") from err

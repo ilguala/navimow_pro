@@ -347,6 +347,25 @@ MOW_SETUP_RESTART_AUTO: Final = 0x21  # 33 - restart, robot's own order (deduced
 MOW_SETUP_RESTART: Final = 0x22  # 34 - restart, honour our zone order
 
 
+# The low nibble again, as a mask: some firmware does not implement the custom
+# sequence at all. An H800 does not merely ignore `ordered` -- it never answers a
+# mow command carrying it (low nibble 2 or 3), which looked exactly like a
+# command that worked. Confirmed 2026-09: identical payloads differing only in
+# this nibble either start a mow (1) or vanish without a trace (2).
+MOW_ORDER_MASK: Final = 0x0F
+MOW_ORDER_AUTO: Final = 0x01
+MOW_ORDER_CUSTOM: Final = 0x02
+
+
+def drop_custom_order(partition_setup: int) -> int:
+    """The same mow options with the custom sequence downgraded to automatic.
+
+    Leaves the restart/continue nibble alone; the robot routes the same zones
+    itself instead of following the order they were given in.
+    """
+    return (partition_setup & ~MOW_ORDER_MASK) | MOW_ORDER_AUTO
+
+
 def mow_setup(*, reset: bool, ordered: bool) -> int:
     """`partitionSetup` for a mow command: restart-vs-continue + order mode.
 

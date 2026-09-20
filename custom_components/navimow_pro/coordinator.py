@@ -19,7 +19,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -27,6 +27,7 @@ from homeassistant.util import dt as dt_util
 from .api import NavimowAuthError, NavimowCloudClient, NavimowError, Tokens
 from .api.client import CMD_STATUS_ANSWERED, NavimowCommandError
 from .const import (
+    drop_custom_order,
     ACTIVE_STATES,
     ACTIVITY_ERROR,
     CONF_ACCESS_TOKEN,
@@ -662,6 +663,18 @@ def _compute_next_mow(set_list: Any, now: Any):
     return None
 
 
+# How this mower starts a mow. Learned at runtime from what it acknowledges, so
+# no model table has to be kept up to date.
+#   "zones"     -- s:mower partitionSetup/partitionIds, exactly as asked.
+#   "no_order"  -- the same, but the custom-sequence bit has to be dropped first.
+#                  H-series firmware never answers a mow command carrying it.
+#   "behavior"  -- c:behavior type 5. Last resort: starts the WHOLE map, takes no
+#                  zone argument at all.
+MOW_START_ZONES = "zones"
+MOW_START_NO_ORDER = "no_order"
+MOW_START_BEHAVIOR = "behavior"
+
+
 class NavimowCoordinator(DataUpdateCoordinator[dict]):
     """Aggregates one mower's state for all platforms."""
 
@@ -692,6 +705,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self.sn: str = data[CONF_VEHICLE_SN]
         self.vehicle_type: int = int(data.get(CONF_VEHICLE_TYPE, 0) or 0)
         self._cycle = 0
+        # Learned on the first start (see async_start_mow): which command
+        # this mower actually acts on. None until one has been tried.
+        self._mow_start: str | None = None
         # Set after a command so the next poll also re-reads the settings group.
         # Without it a written setting appears to bounce back: the write lands,
         # but the entity keeps showing the cached set_list until the slow cycle
@@ -1527,3 +1543,72 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             self._persist_session()
             self._force_slow = True
             await self.async_request_refresh()
+
+    async def async_start_mow(
+        self, partition_ids: str, partition_setup: int, *, zone_subset: bool
+    ) -> None:
+        """Start mowing, using whichever command this mower actually obeys.
+
+        The ``s:mower`` partition command is the one that carries a zone
+        selection, so it is always tried first. An H-series mower never answers
+        it -- the cloud queues it, the mower ignores it, and before commands were
+        acknowledged that was indistinguishable from success. When it goes
+        unanswered, fall back to ``c:behavior`` type 5, which H-series mowers do
+        obey, and remember the choice so later starts skip the probe.
+
+        The fallback mows the WHOLE map, so it cannot stand in for a request to
+        mow particular zones: that is reported rather than quietly turned into
+        "mow everything".
+        """
+        if self._mow_start == MOW_START_BEHAVIOR:
+            await self._start_whole_map(zone_subset)
+            return
+        if self._mow_start == MOW_START_NO_ORDER:
+            partition_setup = drop_custom_order(partition_setup)
+
+        try:
+            await self.async_send_confirmed(
+                self.client.mow_zones, self.sn, partition_ids, partition_setup
+            )
+        except NavimowCommandError:
+            pass
+        else:
+            if self._mow_start is None:
+                self._mow_start = MOW_START_ZONES
+            return
+
+        # Unanswered. The usual reason is the custom-sequence bit: H-series
+        # firmware does not implement it and drops the whole command rather than
+        # ignoring the bit. Retry with the robot routing itself -- same zones,
+        # same restart choice, only the order is no longer ours to pick.
+        relaxed = drop_custom_order(partition_setup)
+        if relaxed != partition_setup:
+            try:
+                await self.async_send_confirmed(
+                    self.client.mow_zones, self.sn, partition_ids, relaxed
+                )
+            except NavimowCommandError:
+                pass
+            else:
+                _LOGGER.debug(
+                    "mower ignores the custom zone sequence -- using automatic order"
+                )
+                self._mow_start = MOW_START_NO_ORDER
+                return
+
+        # Zones are not getting through at all; the whole-map start is all that
+        # is left, and it cannot honour a zone subset.
+        _LOGGER.debug("partition mow command unanswered -- falling back to c:behavior")
+        await self._start_whole_map(zone_subset)
+        self._mow_start = MOW_START_BEHAVIOR
+
+    async def _start_whole_map(self, zone_subset: bool) -> None:
+        """c:behavior start, or a clear refusal if zones were asked for."""
+        if zone_subset:
+            raise HomeAssistantError(
+                "This mower does not accept a zone selection: it ignores the "
+                "partition command and can only be started on the whole map. "
+                "Start it without choosing zones (set the zone select to all "
+                "zones, or omit `zones` from the service call)."
+            )
+        await self.async_send_confirmed(self.client.start_mowing, self.sn)

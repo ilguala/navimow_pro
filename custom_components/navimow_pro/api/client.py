@@ -76,18 +76,18 @@ def _ssl_context() -> ssl.SSLContext:
 CODE_OK = 1
 
 # --- /vehicle/set/response status codes --------------------------------------
-# /vehicle/set/send answers `status: 0` the moment the CLOUD has queued the
-# command, which is all we used to look at. The real outcome only shows up on
-# /vehicle/set/response:
+# Observed on an H800 (2026-09): /vehicle/set/send answers `status: 0` the moment
+# the cloud has queued the command, which is ALL the integration used to look at.
+# The real outcome only shows up on /vehicle/set/response:
 #
 #   2  delivered to the mower, still waiting for its reply
 #   3  the mower replied  (`desc` = "\u5df2\u5e94\u7b54" = "answered",
-#      `respData` carries the handler's result: {"count": N} for a settings
-#      write = the number of keys applied, or {} for a c:behavior command)
+#      `respData` carries the handler's result, e.g. {"count": N} for a settings
+#      write = the number of keys it applied, or {} for a c:behavior command)
 #
 # A command the mower does not understand never leaves 2: it is not rejected and
-# there is no error code, it is simply never answered. That is what makes a
-# failed command indistinguishable from a successful one.
+# there is no error code, it is simply never answered. That is what made a failed
+# mow command indistinguishable from a successful one.
 CMD_STATUS_QUEUED = 0
 CMD_STATUS_PENDING = 2
 CMD_STATUS_ANSWERED = 3
@@ -575,6 +575,22 @@ class NavimowCloudClient:
 
     def resume(self, sn: str) -> dict:
         return self._behavior(sn, 3)
+
+    def start_mowing(self, sn: str) -> dict:
+        """Start a fresh mow of the whole map (cmdCode c:behavior, type 5).
+
+        The H-series route for starting work. Confirmed on an H800 (2026-09):
+        types 1/2/3 are pause/dock/resume, type 5 starts mowing -- the mower
+        answers within 0.5 s and goes to state 0210, clearing per-zone progress.
+        Type 0 is not a command (never answered); type 4 is answered but has no
+        visible effect and is left alone.
+
+        It takes NO zone argument: it always mows the whole map. Zone selection
+        on this firmware does not go through here, and the ``s:mower``
+        partition command (:meth:`mow_zones`) -- which is how the i-series
+        starts a selected mow -- is never answered at all by an H800.
+        """
+        return self._behavior(sn, 5)
 
     def command_status(self, sn: str, cmd_num: str) -> dict:
         """Poll a set/send or set/index command outcome."""

@@ -114,12 +114,17 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         partition_ids = encode_partition_ids(region_ids)
         # A picked zone is a preference to honour; "all zones" is not, so let the
         # robot choose its own route there.
-        await self._send(
-            client.mow_zones,
-            sn,
-            partition_ids,
-            mow_setup(reset=True, ordered=bool(sel)),
-        )
+        try:
+            await self.coordinator.async_start_mow(
+                partition_ids,
+                mow_setup(reset=True, ordered=bool(sel)),
+                zone_subset=bool(sel),
+            )
+        except NavimowCommandError as err:
+            raise HomeAssistantError(
+                "The mower did not acknowledge the start command. The cloud "
+                f"accepted it, but the mower never carried it out. ({err.desc})"
+            ) from err
 
     async def async_pause(self) -> None:
         await self._send(self.coordinator.client.pause, self._sn)
