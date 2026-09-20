@@ -24,6 +24,7 @@ from .const import (
     encode_partition_ids,
     mow_setup,
 )
+from .api.client import NavimowCommandError
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
 
@@ -57,6 +58,22 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
     def __init__(self, coordinator: NavimowCoordinator) -> None:
         super().__init__(coordinator, "mower")
 
+    async def _send(self, func, *args) -> None:
+        """Send a motion command and surface a silent refusal as a real error.
+
+        The cloud queues any command it can parse, so before the acknowledgement
+        was checked a mower that ignored the payload was indistinguishable from
+        one that obeyed: the button returned instantly and nothing happened.
+        """
+        try:
+            await self.coordinator.async_send_confirmed(func, *args)
+        except NavimowCommandError as err:
+            raise HomeAssistantError(
+                "The mower did not acknowledge the command. The cloud accepted "
+                "it, but the mower never carried it out -- it may not understand "
+                f"this command on this model. ({err.desc})"
+            ) from err
+
     @property
     def activity(self) -> LawnMowerActivity:
         return _ACTIVITY_MAP.get(self.data.get("activity"), LawnMowerActivity.DOCKED)
@@ -82,7 +99,7 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         client = self.coordinator.client
         sn = self._sn
         if self.data.get("state_code") in (STATE_PAUSED, STATE_PAUSED_RETURNING):
-            await self.coordinator.async_send(client.resume, sn)
+            await self._send(client.resume, sn)
             return
 
         zones = self.data.get("zones") or []
@@ -97,7 +114,7 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         partition_ids = encode_partition_ids(region_ids)
         # A picked zone is a preference to honour; "all zones" is not, so let the
         # robot choose its own route there.
-        await self.coordinator.async_send(
+        await self._send(
             client.mow_zones,
             sn,
             partition_ids,
@@ -105,10 +122,10 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         )
 
     async def async_pause(self) -> None:
-        await self.coordinator.async_send(self.coordinator.client.pause, self._sn)
+        await self._send(self.coordinator.client.pause, self._sn)
 
     async def async_dock(self) -> None:
-        await self.coordinator.async_send(self.coordinator.client.dock, self._sn)
+        await self._send(self.coordinator.client.dock, self._sn)
 
     @property
     def extra_state_attributes(self) -> dict:
