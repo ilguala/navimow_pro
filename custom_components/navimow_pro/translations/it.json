@@ -120,6 +120,9 @@
       },
       "coverage": {
         "name": "Copertura"
+      },
+      "cut_height": {
+        "name": "Altezza di taglio"
       }
     },
     "calendar": {

@@ -35,6 +35,9 @@ class NavimowSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[dict], Any]
     attrs_fn: Callable[[dict], dict | None] | None = None
+    # Whether this mower gets the entity at all, decided once from the first
+    # snapshot. None = always created.
+    exists_fn: Callable[[dict], bool] | None = None
 
 
 def _schedule_summary(schedule: list | None) -> str | None:
@@ -162,6 +165,22 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         },
     ),
     NavimowSensorDescription(
+        key="cut_height",
+        translation_key="cut_height",
+        icon="mdi:arrow-up-down",
+        device_class=SensorDeviceClass.DISTANCE,
+        native_unit_of_measurement=UnitOfLength.MILLIMETERS,
+        value_fn=lambda d: (d.get("settings") or {}).get("cut_height"),
+        # Read-only, and only where the mower has no motor for the height.
+        # isCutterHeight=0 says "nothing here can change it", not "there is
+        # nothing to show" -- yet it used to hide the value entirely, on mowers
+        # reporting both their height and the full list of steps they accept
+        # (#12). Where the motor exists, the number entity already shows the
+        # value and is the control, so the mower gets one entity, never two.
+        exists_fn=lambda d: (d.get("settings") or {}).get("cut_height") is not None
+        and not d.get("cut_height_supported"),
+    ),
+    NavimowSensorDescription(
         key="error_text",
         translation_key="error_text",
         icon="mdi:alert-circle",
@@ -249,7 +268,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: NavimowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(NavimowSensor(coordinator, desc) for desc in SENSORS)
+    data = coordinator.data or {}
+    async_add_entities(
+        NavimowSensor(coordinator, desc)
+        for desc in SENSORS
+        if desc.exists_fn is None or desc.exists_fn(data)
+    )
 
 
 class NavimowSensor(NavimowEntity, SensorEntity):
