@@ -230,6 +230,42 @@ def _boundary_points(points: Any) -> tuple[list[list[float]], list[int | None]]:
     return poly, flags
 
 
+_SHAPE_DEPTH = 5
+_SHAPE_KEYS = 24
+
+
+def _shape(value: Any, depth: int = 0) -> Any:
+    """The structure of a value with every value taken out.
+
+    Types, lengths and field names only: ``[[1.5, 2.0, 1, 0], ...]`` comes back as
+    ``{"list": 14, "item": {"list": 4, "item": "number"}}``. That is enough to
+    write a decoder for a field nobody has read yet, and it cannot carry a
+    coordinate, a name or an id, because none of those survive -- only the fact
+    that they exist and what kind of thing they are.
+    """
+    if depth >= _SHAPE_DEPTH:
+        return "..."
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    if value is None:
+        return "null"
+    if isinstance(value, dict):
+        keys = list(value)[:_SHAPE_KEYS]
+        shape = {str(k): _shape(value[k], depth + 1) for k in keys}
+        if len(value) > _SHAPE_KEYS:
+            shape["..."] = f"{len(value) - _SHAPE_KEYS} more keys"
+        return shape
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return {"list": 0}
+        return {"list": len(value), "item": _shape(value[0], depth + 1)}
+    return type(value).__name__
+
+
 def _extract_geometry(geom: dict) -> dict:
     """Reduce the raw map_detail object to the shapes the UI needs.
 
@@ -306,6 +342,16 @@ def _extract_geometry(geom: dict) -> dict:
             "keys": sorted(str(k) for k in geom),
             "sub_maps": len(geom.get("sub_maps") or []),
             "element_types": dict(sorted(element_types.items())),
+            # Knowing a key exists is not enough to draw it: "tunnels" turned up
+            # on two mowers in #12 and #15 and its layout was still a guess. The
+            # shape of every top-level key but sub_maps (summarised above) says
+            # how to read it -- and whether it is empty at all, which is the
+            # whole question for obstacles_tbd.
+            "shapes": {
+                str(k): _shape(v)
+                for k, v in sorted(geom.items(), key=lambda kv: str(kv[0]))
+                if k != "sub_maps"
+            },
             "decoded": ["sub_maps/BOUNDARY", "sub_maps/CHARGING_PILE",
                         "obstacles", "vision_off_areas"],
         },
