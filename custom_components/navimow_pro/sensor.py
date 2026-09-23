@@ -15,6 +15,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -171,14 +172,10 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         device_class=SensorDeviceClass.DISTANCE,
         native_unit_of_measurement=UnitOfLength.MILLIMETERS,
         value_fn=lambda d: (d.get("settings") or {}).get("cut_height"),
-        # Read-only, and only where the mower has no motor for the height.
-        # isCutterHeight=0 says "nothing here can change it", not "there is
-        # nothing to show" -- yet it used to hide the value entirely, on mowers
-        # reporting both their height and the full list of steps they accept
-        # (#12). Where the motor exists, the number entity already shows the
-        # value and is the control, so the mower gets one entity, never two.
-        exists_fn=lambda d: (d.get("settings") or {}).get("cut_height") is not None
-        and not d.get("cut_height_supported"),
+        # Read-only fallback for a mower that reports a height but gives no way
+        # to offer a slider (see const.cut_height_control, the single place that
+        # decides between the two, so a mower never gets both or neither).
+        exists_fn=lambda d: d.get("cut_height_control") == "sensor",
     ),
     NavimowSensorDescription(
         key="error_text",
@@ -269,11 +266,19 @@ async def async_setup_entry(
 ) -> None:
     coordinator: NavimowCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    async_add_entities(
-        NavimowSensor(coordinator, desc)
-        for desc in SENSORS
-        if desc.exists_fn is None or desc.exists_fn(data)
-    )
+    registry = er.async_get(hass)
+    keep = []
+    for desc in SENSORS:
+        if desc.exists_fn is None or desc.exists_fn(data):
+            keep.append(NavimowSensor(coordinator, desc))
+            continue
+        # A conditional sensor this mower no longer gets (the read-only cutting
+        # height of 0.6.3, now a slider on most models) would otherwise linger
+        # in the registry as a dead "unavailable" entity next to its replacement.
+        stale = registry.async_get_entity_id("sensor", DOMAIN, f"{coordinator.sn}_{desc.key}")
+        if stale:
+            registry.async_remove(stale)
+    async_add_entities(keep)
 
 
 class NavimowSensor(NavimowEntity, SensorEntity):

@@ -47,6 +47,7 @@ from .const import (
     ERROR_CLEAR_POLLS,
     ERROR_CODES,
     TRAIL_DECIDE_POLLS,
+    cut_height_control,
     ERROR_RESUME_HINT,
     is_docked,
     state_activity,
@@ -1407,6 +1408,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 "today_plan": today_plan,
             },
         }
+        snapshot["cut_height_control"] = cut_height_control(
+            settings.get("cut_height"),
+            snapshot["cut_height_supported"],
+            snapshot["cut_height_options"],
+        )
         return snapshot
 
     @staticmethod
@@ -1551,3 +1557,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._force_slow = True
         await self.async_request_refresh()
         return result
+
+    async def async_refresh_settings(self) -> None:
+        """Re-read the settings group now, and wait for it.
+
+        Unlike async_send's request, this awaits the refresh, so a caller that
+        wants to compare against fresh settings can do so the moment it returns.
+        """
+        self._force_slow = True
+        await self.async_refresh()

@@ -385,3 +385,31 @@ def decode_partition_id_list(be_hex: str) -> list[int]:
     for i in range(0, len(raw) - 1, 2):
         ids.append(int.from_bytes(raw[i : i + 2], "big"))
     return [i for i in ids if i]
+
+
+# Seconds after a cutting-height write before the definitive read-back. The first
+# refresh after a command can still show the old value while the mower applies
+# it, so a single check would cry wolf; this gives it half a minute, then forces a
+# fresh read of the settings and decides.
+CUT_HEIGHT_CONFIRM_S: Final = 30
+
+
+def cut_height_control(height: object, motor_flag: bool, options: list | None) -> str | None:
+    """Which cutting-height entity a mower gets: "slider", "sensor", or None.
+
+    The one place this is decided, so the number and the sensor can never both
+    appear, or both be missing.
+
+    ``isCutterHeight`` used to decide it alone, read as "has a motor for the
+    height". It is not that: three models in #12 answer 0 and change the height
+    from the app. A mower that lists the heights it accepts is the better sign
+    that it takes one, so the slider is offered on either signal -- and every
+    write is read back, because neither signal is proof (see number.py). Only a
+    mower that reports a height with no usable list and no flag gets a plain
+    read-only sensor.
+    """
+    if height is None:
+        return None
+    if motor_flag or len(options or []) >= 2:
+        return "slider"
+    return "sensor"

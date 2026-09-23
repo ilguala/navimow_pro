@@ -16,8 +16,10 @@ rejects an out-of-range value harmlessly.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -26,12 +28,16 @@ from homeassistant.components.number import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfLength
-from homeassistant.core import HomeAssistant
+from homeassistant.components import persistent_notification
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 
-from .const import DOMAIN
+from .const import CUT_HEIGHT_CONFIRM_S, DOMAIN
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -124,10 +130,10 @@ async def async_setup_entry(
     def _supported(desc: NavimowNumberDescription) -> bool:
         if desc.value_fn(settings) is None:
             return False
-        # Plenty of mowers report a height while having only a manual knob;
-        # isCutterHeight is the machine saying it has a motor for it.
+        # Decided in one place with the read-only sensor (const.cut_height_control),
+        # so a mower gets exactly one of the two.
         if desc.key == "cut_height":
-            return bool(data.get("cut_height_supported"))
+            return data.get("cut_height_control") == "slider"
         return True
 
     async_add_entities(
@@ -164,6 +170,12 @@ class NavimowNumber(NavimowEntity, NumberEntity):
             steps = {b - a for a, b in zip(options, options[1:])}
             self._attr_native_step = float(min(steps)) if steps else 1.0
         self._allowed = options if description.key == "cut_height" else []
+        # Cutting-height read-back: what was asked and not yet seen applied, a
+        # target that failed (so a late success can still clear the warning),
+        # and the scheduled confirmation.
+        self._pending: int | None = None
+        self._failed: int | None = None
+        self._unsub_confirm = None
 
     @property
     def native_value(self) -> float | None:
@@ -195,3 +207,78 @@ class NavimowNumber(NavimowEntity, NumberEntity):
             self.coordinator.vehicle_type,
             {key: cloud_val},
         )
+        if desc.key == "cut_height":
+            self._expect(wire)
+
+    # ------------------------------------------------- cutting-height read-back
+    def _expect(self, target: int) -> None:
+        """Remember what was asked, and come back to check it was applied.
+
+        The slider is offered on the strength of the mower listing the heights
+        it accepts, or of isCutterHeight -- two signals, neither proof (#12).
+        Reading the value back is the proof, and with no mower to test on it is
+        the only way a model that quietly ignores the write gets noticed at all.
+        """
+        self._cancel_confirm()
+        self._pending = target
+        self._unsub_confirm = async_call_later(
+            self.hass, CUT_HEIGHT_CONFIRM_S, self._async_confirm
+        )
+
+    def _cancel_confirm(self) -> None:
+        if self._unsub_confirm is not None:
+            self._unsub_confirm()
+            self._unsub_confirm = None
+
+    async def _async_confirm(self, _now: datetime) -> None:
+        """Half a minute on: read the settings afresh, then decide.
+
+        The coordinator notifies this entity as part of that refresh, so if the
+        value arrived, _handle_coordinator_update has already cleared _pending by
+        the time the await returns. Anything still pending was not applied.
+        """
+        self._unsub_confirm = None
+        if self._pending is None:
+            return
+        await self.coordinator.async_refresh_settings()
+        if self._pending is None:
+            return
+        target, self._pending = self._pending, None
+        self._failed = target
+        current = self.entity_description.value_fn(self.data.get("settings") or {})
+        _LOGGER.warning(
+            "Cutting height not applied: asked for %s mm, the mower still reports %s mm",
+            target,
+            current,
+        )
+        persistent_notification.async_create(
+            self.hass,
+            f"{self.data.get('name') or 'The mower'} did not apply the cutting height: "
+            f"asked for {target} mm, it still reports {current} mm.\n\n"
+            "This model may not accept the height from Home Assistant. It would help "
+            "to say so, with a diagnostics download, at "
+            "https://github.com/ilguala/navimow_pro/issues",
+            title="Navimow: cutting height not applied",
+            notification_id=self._note_id,
+        )
+
+    @property
+    def _note_id(self) -> str:
+        return f"{DOMAIN}_{self._sn}_cut_height"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        current = self.entity_description.value_fn(self.data.get("settings") or {})
+        if current is not None:
+            if self._pending is not None and int(current) == self._pending:
+                self._pending = None
+                self._cancel_confirm()
+            if self._failed is not None and int(current) == self._failed:
+                # Arrived late after all: take the warning back.
+                self._failed = None
+                persistent_notification.async_dismiss(self.hass, self._note_id)
+        super()._handle_coordinator_update()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._cancel_confirm()
+        await super().async_will_remove_from_hass()
