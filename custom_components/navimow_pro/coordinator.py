@@ -280,12 +280,35 @@ def _extract_geometry(geom: dict) -> dict:
         for vo in (geom.get("vision_off_areas") or [])
         if isinstance(vo, dict) and (pts := _points_xy(vo.get("points")))
     ]
+    # What the blob actually holds, as names and counts only -- never values.
+    # The decoder reads sub_maps, obstacles and vision_off_areas, and inside a
+    # sub-map only BOUNDARY and CHARGING_PILE; anything else is dropped in
+    # silence, which is how "the app draws the corridors between zones and the
+    # integration does not" (#15) turned into guesswork. Now a diagnostics file
+    # answers it: if a corridor is in there, its container or element type shows
+    # up here under a name nobody has read yet.
+    element_types: dict[str, int] = {}
+    for sm in geom.get("sub_maps") or []:
+        if not isinstance(sm, dict):
+            continue
+        for el in sm.get("elements") or []:
+            if isinstance(el, dict):
+                name = str(el.get("type") or "?")
+                element_types[name] = element_types.get(name, 0) + 1
+
     return {
         "area": _as_float(geom.get("area")),
         "zones": zones,
         "obstacles": obstacles,
         "vision_off": vision_off,
         "station": station,
+        "inventory": {
+            "keys": sorted(str(k) for k in geom),
+            "sub_maps": len(geom.get("sub_maps") or []),
+            "element_types": dict(sorted(element_types.items())),
+            "decoded": ["sub_maps/BOUNDARY", "sub_maps/CHARGING_PILE",
+                        "obstacles", "vision_off_areas"],
+        },
     }
 
 
@@ -876,6 +899,16 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             if 0 <= due_in <= MOW_SOON_WINDOW:
                 return DEFAULT_SCAN_INTERVAL
         return IDLE_SCAN_INTERVAL
+
+    @property
+    def map_inventory(self) -> dict[str, Any] | None:
+        """Names and counts of what the map blob carries (read-only; diagnostics).
+
+        Only key names, element type names and how many of each -- no geometry
+        and no coordinates. It answers "is the thing I want even in there, and
+        what is it called?" without anyone having to send a raw map.
+        """
+        return (self._map_geometry or {}).get("inventory")
 
     @property
     def raw_payloads(self) -> dict[str, Any]:

@@ -251,6 +251,8 @@ async def async_get_config_entry_diagnostics(
     data["endpoints"] = {
         key: ("empty" if not value else type(value).__name__) for key, value in raw.items()
     }
+    # Names and counts only, so it survives redaction and stays readable.
+    data["map_inventory"] = coordinator.map_inventory or "map not decoded"
     data["raw"] = _redact(_trim(raw), frozen)
     data["snapshot"] = _redact(_trim(coordinator.data or {}), frozen)
     return data
