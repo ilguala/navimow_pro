@@ -52,6 +52,119 @@ _MOWER_ORANGE = "#ff6d00"
 _OBSTACLE_FILL = "#616161"
 _NOMOW_FILL = "#bdbdbd"
 
+# Zone labels shrink to fit their zone between these sizes. At _LABEL_MAX a pill
+# is exactly the one every earlier version drew, so a map of large zones does not
+# change; only labels that would have swamped a small zone get smaller.
+_LABEL_MAX = 15.0
+# Not lower: a label nobody can read is worse than one that covers a strip. 12 is
+# just under the legend (13) and the status line (14), the smallest text drawn.
+_LABEL_MIN = 12.0
+# Nudges tried when a label's centroid is taken, as fractions of the label's own
+# width and height. Small steps first: a thin diagonal zone may have room for its
+# label only a few pixels from the centre, which a jump of a whole line misses.
+_LABEL_STEPS_X = (0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75)
+_LABEL_STEPS_Y = (0.0, 0.5, -0.5, 1.1, -1.1, 1.7, -1.7, 2.2, -2.2)
+
+
+def _centroid(pts: list[tuple[float, float]]) -> tuple[float, float, float]:
+    """(x, y, area) of a polygon's area centroid.
+
+    The vertex average used before is pulled toward whichever edge has the most
+    points -- a curved edge, typically -- and on a thin or bent zone it can land
+    outside the zone altogether. With no area to speak of, fall back to it.
+    """
+    n = len(pts)
+    a = cx = cy = 0.0
+    for i in range(n):
+        x0, y0 = pts[i]
+        x1, y1 = pts[(i + 1) % n]
+        cross = x0 * y1 - x1 * y0
+        a += cross
+        cx += (x0 + x1) * cross
+        cy += (y0 + y1) * cross
+    if abs(a) < 1e-9:
+        return sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, 0.0
+    a *= 0.5
+    return cx / (6.0 * a), cy / (6.0 * a), abs(a)
+
+
+def _label_box(cx: float, cy: float, text: str, size: float) -> tuple[float, float, float, float]:
+    """The pill a label occupies: (x0, y0, x1, y1). Drawing and placement both use it."""
+    w = len(text) * size * 0.58 + size * 1.2
+    h = size * 1.8
+    return cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0
+
+
+def _inside(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
+    """Ray-casting point-in-polygon."""
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _covers(box, points) -> bool:
+    return any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for x, y in points)
+
+
+def _boxes_overlap(a, b, gap: float = 2.0) -> bool:
+    return not (a[2] + gap <= b[0] or b[2] + gap <= a[0] or a[3] + gap <= b[1] or b[3] + gap <= a[1])
+
+
+def _place_labels(labels, reserved, view: float):
+    """Size each zone label to its zone and move it off the others.
+
+    ``labels`` are (x, y, text, zone_width_px, zone_area_px, zone_polygon_px);
+    ``reserved`` are boxes no label may cover -- legend, status line, dock,
+    mower. Larger zones are placed first, so a big zone keeps its label dead
+    centre and a small one is what gets nudged.
+
+    Candidate spots form a grid of nudges around the centroid (_LABEL_STEPS_*),
+    tried nearest first and always inside the picture. The nearest free spot
+    whose centre lies inside the label's own zone wins: a label pushed onto the
+    NEIGHBOURING zone reads as that zone's name, which is worse than one a little
+    off centre. Failing that, the nearest free spot whose pill covers no other
+    zone's centroid, so a label that cannot sit on its own zone does not take the
+    place another one needs -- checked on the whole pill, since a label several
+    times wider than a small zone can have its centre on empty ground and its body
+    on the neighbour. Then the nearest free spot anywhere, and last the centroid,
+    because a label in the wrong place still names the zone.
+    """
+    boxes = list(reserved)
+    placed = []
+    anchors = [(lb[0], lb[1]) for lb in labels]
+    for index, (cx, cy, text, width_px, _area, poly) in sorted(
+        enumerate(labels), key=lambda item: -item[1][4]
+    ):
+        others = [a for i, a in enumerate(anchors) if i != index]
+        size = max(_LABEL_MIN, min(_LABEL_MAX, width_px / (len(text) * 0.58 + 1.2)))
+        x0, y0, x1, y1 = _label_box(cx, cy, text, size)
+        w, h = x1 - x0, y1 - y0
+        free = []
+        nudges = sorted(
+            ((fx * w, fy * h) for fx in _LABEL_STEPS_X for fy in _LABEL_STEPS_Y),
+            key=lambda d: d[0] * d[0] + d[1] * d[1],
+        )
+        for dx, dy in nudges:
+            cand = _label_box(cx + dx, cy + dy, text, size)
+            if cand[0] < 0 or cand[1] < 0 or cand[2] > view or cand[3] > view:
+                continue
+            if not any(_boxes_overlap(cand, b) for b in boxes):
+                free.append((cx + dx, cy + dy))
+        spot = next((p for p in free if _inside(p[0], p[1], poly)), None)
+        if spot is None:
+            spot = next((p for p in free if not _covers(_label_box(p[0], p[1], text, size), others)), None)
+        if spot is None:
+            spot = free[0] if free else (cx, cy)
+        boxes.append(_label_box(spot[0], spot[1], text, size))
+        placed.append((spot[0], spot[1], text, size))
+    return placed
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -170,7 +283,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
         # (dashed for virtual-boundary edges, solid for ride-on/straddle edges),
         # mirroring the app. Labels are collected and drawn LAST so they sit above
         # the mowed layer.
-        zone_labels: list[tuple[float, float, str]] = []
+        zone_labels: list[tuple[float, float, str, float, float, list]] = []
         for z in zones:
             poly = z.get("polygon") or []
             if len(poly) < 3:
@@ -181,13 +294,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 f'stroke="none"/>'
             )
             parts.append(self._perimeter(poly, z.get("boundary_flags") or [], sx, sy))
-            cx = sum(sx(x) for x, _ in poly) / len(poly)
-            cy = sum(sy(y) for _, y in poly) / len(poly)
+            screen = [(sx(x), sy(y)) for x, y in poly]
+            cx, cy, area_px = _centroid(screen)
+            width_px = max(p[0] for p in screen) - min(p[0] for p in screen)
             zname = str(z.get("name") or "")
             zpct = cov_by_id.get(z.get("id"))
             zlabel = f"{zname} · {zpct}%" if zpct is not None else zname
             if zlabel:
-                zone_labels.append((cx, cy, zlabel))
+                zone_labels.append((cx, cy, zlabel, width_px, area_px, screen))
 
         # Obstacles (dark gray fill).
         for ob in obstacles:
@@ -252,9 +366,29 @@ class NavimowMapCamera(NavimowEntity, Camera):
         if px is not None and py is not None:
             parts.append(self._mower(sx(px), sy(py), heading))
 
+        cov_pct = cov.get("overall_pct")
+        cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
+        label = f"{data.get('state', '')} · {data.get('battery', '?')}%{cov_txt}"
+
         # Zone labels (rounded pills) -- on top of the mowed layer so they read.
-        for cx, cy, text in zone_labels:
-            parts.append(self._pill_label(cx, cy, text, size=15))
+        # Sized to their zone and kept off one another, the legend, the status
+        # line, the dock and the mower. With one fixed size, a nine-zone map
+        # (#12) had pills wider than the strips they named, stacked on each
+        # other and on the mower icon.
+        legend_rows = (
+            1 + (len(trail) >= 2) + (station is not None) + bool(obstacles) + bool(vision_off)
+        )
+        reserved = [
+            (8.0, 8.0, 128.0, 16.0 + 20 * legend_rows),
+            (8.0, _VIEW - 30.0, 16.0 + len(label) * 14 * 0.58, _VIEW - 4.0),
+        ]
+        if px is not None and py is not None:
+            reserved.append((sx(px) - 16, sy(py) - 13, sx(px) + 16, sy(py) + 13))
+        if station and station.get("x") is not None and station.get("y") is not None:
+            stx, sty = sx(station["x"]), sy(station["y"])
+            reserved.append((stx - 12, sty - 10, stx + 12, sty + 10))
+        for x, y, text, size in _place_labels(zone_labels, reserved, _VIEW):
+            parts.append(self._pill_label(x, y, text, size=size))
 
         # Legend + status line.
         parts.append(
@@ -262,9 +396,6 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 bool(obstacles), bool(vision_off), station is not None, len(trail) >= 2
             )
         )
-        cov_pct = cov.get("overall_pct")
-        cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
-        label = f"{data.get('state', '')} · {data.get('battery', '?')}%{cov_txt}"
         parts.append(self._label(12, _VIEW - 12, label, size=14, anchor="start"))
 
         parts.append("</svg>")
@@ -359,23 +490,22 @@ class NavimowMapCamera(NavimowEntity, Camera):
         )
 
     @staticmethod
-    def _pill_label(cx: float, cy: float, text: str, *, size: int) -> str:
+    def _pill_label(cx: float, cy: float, text: str, *, size: float) -> str:
         """A rounded light-gray "pill" label with dark text (app style).
 
         Always a light pill with dark text, so it stays readable on both light
-        and dark HA themes and over any fill.
+        and dark HA themes and over any fill. The box is _label_box's, the same
+        one placement checked, so what is drawn is what was kept clear.
         """
         safe = html.escape(str(text))
-        w = len(text) * size * 0.58 + 18.0
-        h = size + 12.0
-        x = cx - w / 2.0
-        y = cy - h / 2.0
+        x0, y0, x1, y1 = _label_box(cx, cy, text, size)
+        h = y1 - y0
         return (
-            f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
-            f'rx="{h / 2.0:.1f}" fill="#eceff1" fill-opacity="0.92" '
+            f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{x1 - x0:.1f}" height="{h:.1f}" '
+            f'rx="{h / 2.0:.1f}" fill="#eceff1" fill-opacity="0.85" '
             f'stroke="#b0bec5" stroke-width="1"/>'
             f'<text x="{cx:.1f}" y="{cy + size * 0.35:.1f}" text-anchor="middle" '
-            f'font-family="sans-serif" font-size="{size}" font-weight="600" '
+            f'font-family="sans-serif" font-size="{size:.1f}" font-weight="600" '
             f'fill="#37474f">{safe}</text>'
         )
 
