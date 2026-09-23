@@ -74,6 +74,23 @@ def _ssl_context() -> ssl.SSLContext:
 
 
 CODE_OK = 1
+
+# --- /vehicle/set/response status codes --------------------------------------
+# Observed on an H800 (2026-09): /vehicle/set/send answers `status: 0` the moment
+# the cloud has queued the command, which is ALL the integration used to look at.
+# The real outcome only shows up on /vehicle/set/response:
+#
+#   2  delivered to the mower, still waiting for its reply
+#   3  the mower replied  (`desc` = "\u5df2\u5e94\u7b54" = "answered",
+#      `respData` carries the handler's result, e.g. {"count": N} for a settings
+#      write = the number of keys it applied, or {} for a c:behavior command)
+#
+# A command the mower does not understand never leaves 2: it is not rejected and
+# there is no error code, it is simply never answered. That is what made a failed
+# mow command indistinguishable from a successful one.
+CMD_STATUS_QUEUED = 0
+CMD_STATUS_PENDING = 2
+CMD_STATUS_ANSWERED = 3
 # Business codes that indicate an auth/session problem -> refresh + re-login.
 AUTH_ERROR_CODES = {
     90015,
@@ -114,6 +131,24 @@ class NavimowError(Exception):
 
 class NavimowAuthError(NavimowError):
     """Auth/session problem (token expired, wrong uid, kicked, bad creds)."""
+
+
+class NavimowCommandError(NavimowError):
+    """The cloud queued a command but the mower never carried it out.
+
+    Raised when /vehicle/set/response never reaches CMD_STATUS_ANSWERED. The
+    cloud call itself succeeded, so nothing else in the stack would have failed.
+    """
+
+    def __init__(self, cmd_num: str, last: dict | None = None) -> None:
+        last = last or {}
+        super().__init__(
+            "unacknowledged",
+            f"the mower never answered command {cmd_num} "
+            f"(last status {last.get('status')!r})",
+        )
+        self.cmd_num = cmd_num
+        self.last = last
 
 
 class NavimowCloudClient:
@@ -541,11 +576,45 @@ class NavimowCloudClient:
     def resume(self, sn: str) -> dict:
         return self._behavior(sn, 3)
 
+    def start_mowing(self, sn: str) -> dict:
+        """Start a fresh mow of the whole map (cmdCode c:behavior, type 5).
+
+        The H-series route for starting work. Confirmed on an H800 (2026-09):
+        types 1/2/3 are pause/dock/resume, type 5 starts mowing -- the mower
+        answers within 0.5 s and goes to state 0210, clearing per-zone progress.
+        Type 0 is not a command (never answered); type 4 is answered but has no
+        visible effect and is left alone.
+
+        It takes NO zone argument: it always mows the whole map. Zone selection
+        on this firmware does not go through here, and the ``s:mower``
+        partition command (:meth:`mow_zones`) -- which is how the i-series
+        starts a selected mow -- is never answered at all by an H800.
+        """
+        return self._behavior(sn, 5)
+
     def command_status(self, sn: str, cmd_num: str) -> dict:
         """Poll a set/send or set/index command outcome."""
         return self.call(
             "/vehicle/set/response", {"vehicle_sn": sn, "cmd_num": cmd_num}
         ) or {}
+
+    @staticmethod
+    def cmd_num_of(result: Any) -> str:
+        """The command id in a /vehicle/set/send reply, or "" if absent."""
+        if isinstance(result, dict) and result.get("cmd_num"):
+            return str(result["cmd_num"])
+        return ""
+
+    @staticmethod
+    def resp_data_of(status: dict) -> Any:
+        """The mower's own reply payload, decoded. ``respData`` is a JSON string."""
+        raw = (status or {}).get("respData")
+        if not isinstance(raw, str):
+            return raw
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return raw
 
     # -------------------------------------------------------------- settings
     def save_setting(self, sn: str, data: dict) -> Any:
