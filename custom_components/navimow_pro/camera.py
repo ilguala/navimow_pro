@@ -24,7 +24,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SWATH_WIDTH_M, TRAIL_BREAK_M
+from .const import (
+    DEFAULT_MOWER_SCALE,
+    DOMAIN,
+    MOWER_SCALE_MAX,
+    MOWER_SCALE_MIN,
+    OPT_MOWER_SCALE,
+    SWATH_WIDTH_M,
+    TRAIL_BREAK_M,
+)
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
 
@@ -193,6 +201,12 @@ class NavimowMapCamera(NavimowEntity, Camera):
         Camera.__init__(self)
         # Set after Camera.__init__ so it is not shadowed by the base default.
         self.content_type = "image/svg+xml"
+        # Changing options reloads the entry, so reading them once is enough.
+        try:
+            pct = float(coordinator.entry.options.get(OPT_MOWER_SCALE, DEFAULT_MOWER_SCALE))
+        except (TypeError, ValueError):
+            pct = DEFAULT_MOWER_SCALE
+        self._mower_scale = max(MOWER_SCALE_MIN, min(MOWER_SCALE_MAX, pct)) / 100.0
 
     def camera_image(
         self, width: int | None = None, height: int | None = None
@@ -413,7 +427,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
 
         # Mower (robot icon oriented to its heading).
         if px is not None and py is not None:
-            parts.append(self._mower(sx(px), sy(py), heading))
+            parts.append(self._mower(sx(px), sy(py), heading, self._mower_scale))
 
         cov_pct = cov.get("overall_pct")
         cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
@@ -432,7 +446,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
             (8.0, _VIEW - 30.0, 16.0 + len(label) * 14 * 0.58, _VIEW - 4.0),
         ]
         if px is not None and py is not None:
-            reserved.append((sx(px) - 16, sy(py) - 13, sx(px) + 16, sy(py) + 13))
+            ms = self._mower_scale
+            reserved.append((sx(px) - 16 * ms, sy(py) - 13 * ms, sx(px) + 16 * ms, sy(py) + 13 * ms))
         if station and station.get("x") is not None and station.get("y") is not None:
             stx, sty = sx(station["x"]), sy(station["y"])
             reserved.append((stx - 12, sty - 10, stx + 12, sty + 10))
@@ -558,15 +573,15 @@ class NavimowMapCamera(NavimowEntity, Camera):
         )
 
     @staticmethod
-    def _mower(cx: float, cy: float, heading: float | None) -> str:
+    def _mower(cx: float, cy: float, heading: float | None, scale: float = 1.0) -> str:
         """A little robot-mower icon, rotated to face its heading.
 
         World heading is CCW from +x with y-up; SVG y is down, so the SVG
-        rotation is the negated degrees.
+        rotation is the negated degrees. ``scale`` is the mower size option.
         """
         deg = 0.0 if heading is None else -math.degrees(heading)
         return (
-            f'<g transform="translate({cx:.1f},{cy:.1f}) rotate({deg:.1f})">'
+            f'<g transform="translate({cx:.1f},{cy:.1f}) rotate({deg:.1f}) scale({scale:.2f})">'
             # body (dark, rounded) with a white outline so it pops on any fill
             f'<rect x="-15" y="-12" width="30" height="24" rx="8" fill="#263238" '
             f'stroke="#ffffff" stroke-width="2.5"/>'
