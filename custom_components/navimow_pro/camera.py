@@ -61,7 +61,10 @@ _VISION_OFF_FILL = "#90caf9"
 _VISION_OFF_STROKE = "#42a5f5"
 # Wide enough for "VisionFence off" at the legend's 13 px.
 _LEGEND_W = 146
-_CHANNEL_STROKE = "#90a4ae"  # channels between zones: the app's thin grey path
+# Channels between zones: a darker line over a light casing, like a path on a
+# map, so it stands out on both light and dark themes.
+_CHANNEL_STROKE = "#546e7a"
+_CHANNEL_CASING = "#ffffff"
 
 # Zone labels shrink to fit their zone between these sizes -- smaller than the
 # legend (13) and status line (14) on purpose: at 15, on a many-zone map, the
@@ -289,19 +292,6 @@ class NavimowMapCamera(NavimowEntity, Camera):
             f'viewBox="0 0 {_VIEW} {_VIEW}">'
         ]
 
-        # Channels between zones, drawn first so the zones sit over them: the
-        # stretch across open ground reads at full strength, the part inside a
-        # zone only through its light fill -- which is how the app shows them.
-        for tn in tunnels:
-            pts = tn.get("points") or []
-            if len(pts) < 2:
-                continue
-            path = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in pts)
-            parts.append(
-                f'<polyline points="{path}" fill="none" stroke="{_CHANNEL_STROKE}" '
-                f'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
-            )
-
         # Zones: soft uniform green fill (no border) + a per-segment perimeter
         # (dashed for virtual-boundary edges, solid for ride-on/straddle edges),
         # mirroring the app. Labels are collected and drawn LAST so they sit above
@@ -381,9 +371,41 @@ class NavimowMapCamera(NavimowEntity, Camera):
                         f'stroke-linecap="round" stroke-linejoin="round"/>'
                     )
             if trail_parts:
+                # Clipped to the zones. The mower only cuts inside them, so any
+                # trail outside is travel -- a trip down a channel -- or half the
+                # swath hanging over an edge it was following. The app draws
+                # neither, and #15 read both as the mower leaving its boundaries.
+                # With no zone geometry yet the trail is drawn as it is.
+                clip = ""
+                zone_polys = [z.get("polygon") for z in zones if len(z.get("polygon") or []) >= 3]
+                if zone_polys:
+                    shapes = "".join(
+                        '<polygon points="%s"/>'
+                        % " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
+                        for poly in zone_polys
+                    )
+                    parts.append(f'<defs><clipPath id="zones">{shapes}</clipPath></defs>')
+                    clip = ' clip-path="url(#zones)"'
                 parts.append(
-                    f'<g opacity="{_TRAIL_OPACITY}">{"".join(trail_parts)}</g>'
+                    f'<g opacity="{_TRAIL_OPACITY}"{clip}>{"".join(trail_parts)}</g>'
                 )
+
+        # Channels between zones, on top of everything but the markers: drawn
+        # under the zones they disappeared into the dashed boundaries they
+        # cross, and the grey read as nothing on a light theme -- #15's owner had
+        # to circle all nine by hand to show where they were.
+        for tn in tunnels:
+            pts = tn.get("points") or []
+            if len(pts) < 2:
+                continue
+            path = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in pts)
+            parts.append(
+                f'<polyline points="{path}" fill="none" stroke="{_CHANNEL_CASING}" '
+                f'stroke-opacity="0.75" stroke-width="6" stroke-linecap="round" '
+                f'stroke-linejoin="round"/>'
+                f'<polyline points="{path}" fill="none" stroke="{_CHANNEL_STROKE}" '
+                f'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+            )
 
         # Dock / charging station (small house marker).
         if station and station.get("x") is not None and station.get("y") is not None:
