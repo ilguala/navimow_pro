@@ -49,10 +49,18 @@ _BORDER_SOLID_ATTR = 2
 _TRAIL_COLOR = "#43a047"    # mowed layer (opaque, flattened via group opacity)
 _TRAIL_OPACITY = 0.40       # applied to the WHOLE trail group -> no compounding
 _MOWER_ORANGE = "#ff6d00"
-_OBSTACLE_FILL = "#616161"
-# No-mow areas in the app's blue, so they are not mistaken for obstacles (#12).
-_NOMOW_FILL = "#90caf9"
-_NOMOW_STROKE = "#42a5f5"
+# The map's "obstacles" are what the app calls off-limit areas -- the no-go zones
+# an owner draws -- and the app outlines them in orange. Its "vision_off_areas"
+# are VisionFence-off areas, where the camera boundary is ignored so the mower can
+# cross a path, and the app draws those in blue. Earlier versions labelled them
+# "Obstacle" and "No-mow", which is how a blue crossing came to be asked about as
+# a no-mow zone (#12, spotted by vahesoo comparing the two maps).
+_OFF_LIMIT_FILL = "#ffab91"
+_OFF_LIMIT_STROKE = "#ff7043"
+_VISION_OFF_FILL = "#90caf9"
+_VISION_OFF_STROKE = "#42a5f5"
+# Wide enough for "VisionFence off" at the legend's 13 px.
+_LEGEND_W = 146
 _CHANNEL_STROKE = "#90a4ae"  # channels between zones: the app's thin grey path
 
 # Zone labels shrink to fit their zone between these sizes -- smaller than the
@@ -216,8 +224,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
         }
         trail = data.get("trail") or []
 
-        # Bounding box: derive it from the STABLE geometry (zones/obstacles/
-        # no-mow/dock) first, then include only the dynamic points (mower +
+        # Bounding box: derive it from the STABLE geometry (zones/off-limit/
+        # VisionFence-off/channels/dock) first, then include only the dynamic points (mower +
         # trail) that fall within a margin of it. This stops a single bogus
         # posture sample from permanently shrinking the real lawn into a corner.
         stable: list[list[float]] = []
@@ -323,24 +331,24 @@ class NavimowMapCamera(NavimowEntity, Camera):
             if texts:
                 zone_labels.append((cx, cy, texts, width_px, area_px, screen))
 
-        # Obstacles (dark gray fill).
+        # Off-limit areas (the map's "obstacles"), outlined in the app's orange.
         for ob in obstacles:
             if len(ob) < 3:
                 continue
             pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in ob)
             parts.append(
-                f'<polygon points="{pts_str}" fill="{_OBSTACLE_FILL}" fill-opacity="0.70" '
-                f'stroke="#424242" stroke-width="1.5" stroke-linejoin="round"/>'
+                f'<polygon points="{pts_str}" fill="{_OFF_LIMIT_FILL}" fill-opacity="0.35" '
+                f'stroke="{_OFF_LIMIT_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>'
             )
 
-        # Vision-off / no-mow areas, in the app's blue.
+        # VisionFence-off areas (the map's "vision_off_areas"), in the app's blue.
         for vo in vision_off:
             if len(vo) < 3:
                 continue
             pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in vo)
             parts.append(
-                f'<polygon points="{pts_str}" fill="{_NOMOW_FILL}" fill-opacity="0.30" '
-                f'stroke="{_NOMOW_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>'
+                f'<polygon points="{pts_str}" fill="{_VISION_OFF_FILL}" fill-opacity="0.30" '
+                f'stroke="{_VISION_OFF_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>'
             )
 
         # Mowed trail: a single flat translucent green layer. Each pass is drawn
@@ -398,7 +406,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
             1 + (len(trail) >= 2) + (station is not None) + bool(obstacles) + bool(vision_off)
         )
         reserved = [
-            (8.0, 8.0, 128.0, 16.0 + 20 * legend_rows),
+            (8.0, 8.0, 8.0 + _LEGEND_W, 16.0 + 20 * legend_rows),
             (8.0, _VIEW - 30.0, 16.0 + len(label) * 14 * 0.58, _VIEW - 4.0),
         ]
         if px is not None and py is not None:
@@ -563,7 +571,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
         )
 
     def _legend(
-        self, has_obstacle: bool, has_no_mow: bool, has_dock: bool, has_trail: bool
+        self, has_off_limit: bool, has_vision_off: bool, has_dock: bool, has_trail: bool
     ) -> str:
         """Compact, discreet legend of marker meanings (top-left overlay)."""
         rows: list[tuple[str, str]] = [(_MOWER_ORANGE, "Mower")]
@@ -571,14 +579,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
             rows.append((_TRAIL_COLOR, "Mowed"))
         if has_dock:
             rows.append(("#455a64", "Dock"))
-        if has_obstacle:
-            rows.append((_OBSTACLE_FILL, "Obstacle"))
-        if has_no_mow:
-            rows.append((_NOMOW_FILL, "No-mow"))
+        if has_off_limit:
+            rows.append((_OFF_LIMIT_FILL, "Off-limit area"))
+        if has_vision_off:
+            rows.append((_VISION_OFF_FILL, "VisionFence off"))
         x0, y0, dy = 14, 22, 20
         h = dy * len(rows) + 8
         parts = [
-            f'<rect x="8" y="8" width="120" height="{h}" rx="6" '
+            f'<rect x="8" y="8" width="{_LEGEND_W}" height="{h}" rx="6" '
             f'fill="#000000" fill-opacity="0.05" stroke="#9e9e9e" stroke-opacity="0.25"/>'
         ]
         for i, (color, name) in enumerate(rows):

@@ -33,7 +33,7 @@ All entities live under a single Home Assistant device (the mower).
 | `device_tracker` | Mower position | The mower on Home Assistant's map, for zone and proximity automations (see below) |
 | `select` | Mow zone | Stores which zone the `lawn_mower` Start button will mow (or "All zones") — it does **not** start mowing itself |
 | `switch` | Night mowing, rain handling, sound, power saving, and the mower's other settings | Settings whose behaviour is unconfirmed are opt-in / disabled by default |
-| `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), obstacles / no-mow areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
+| `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), channels between zones, off-limit areas and VisionFence-off areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
 
 Motion commands (start / pause / dock) only ever fire on an explicit user
 action. Nothing auto-mows on setup or on a poll.
@@ -93,7 +93,8 @@ Worth knowing before you rely on it:
 The `camera` entity draws a live map in the style of the mobile app: each zone
 with the share of it already cut, the perimeter drawn dashed where it is a
 virtual boundary and solid where it is a physical edge, the channels that link
-zones, obstacles, no-mow areas in blue, the charging station, the mower's current
+zones, off-limit areas in orange and VisionFence-off areas in blue (as the app
+colours them), the charging station, the mower's current
 position, and the mowed trail built up as it works. It survives restarts.
 
 Zone labels follow the app: a label is drawn only where it fits entirely inside
