@@ -394,7 +394,31 @@ def decode_partition_id_list(be_hex: str) -> list[int]:
 CUT_HEIGHT_CONFIRM_S: Final = 30
 
 
-def cut_height_control(height: object, motor_flag: bool, options: list | None) -> str | None:
+# What the shared payload advertises on a model family that does not actually
+# have it -- each entry confirmed in the field, never inferred (#12). Every model
+# reports much the same settings list, so a field being present is discovery, not
+# proof. Matched on the start of the model name the cloud reports ("i108E",
+# "X315"), so a new model in a listed family inherits its entry and a model in no
+# listed family loses nothing. Families are only added here on confirmation:
+# "H5" would also catch the H500, which is an H1.
+FAMILY_LACKS: Final = (
+    # i1 (i105 / i108 / i110): the cutting height is a manual knob.
+    ("I1", frozenset({"cut_height_remote"})),
+    # X3 (X315 / X330 / X350 / X390): reports chargingLimit, but the Navimow app
+    # offers no charge limit on it. Two owners, independently.
+    ("X3", frozenset({"charging_limit"})),
+)
+
+
+def model_lacks(model: object, capability: str) -> bool:
+    """Whether the model's family is known not to have ``capability``."""
+    name = str(model or "").strip().upper()
+    return any(name.startswith(prefix) and capability in caps for prefix, caps in FAMILY_LACKS)
+
+
+def cut_height_control(
+    height: object, motor_flag: bool, options: list | None, remote: bool = True
+) -> str | None:
     """Which cutting-height entity a mower gets: "slider", "sensor", or None.
 
     The one place this is decided, so the number and the sensor can never both
@@ -406,10 +430,12 @@ def cut_height_control(height: object, motor_flag: bool, options: list | None) -
     that it takes one, so the slider is offered on either signal -- and every
     write is read back, because neither signal is proof (see number.py). Only a
     mower that reports a height with no usable list and no flag gets a plain
-    read-only sensor.
+    read-only sensor -- as does one whose family is known to have a manual knob
+    (``remote=False``, from FAMILY_LACKS): an i1 lists its heights too, and a
+    slider there would move nothing but a notification.
     """
     if height is None:
         return None
-    if motor_flag or len(options or []) >= 2:
+    if remote and (motor_flag or len(options or []) >= 2):
         return "slider"
     return "sensor"

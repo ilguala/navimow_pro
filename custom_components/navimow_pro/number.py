@@ -30,10 +30,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfLength
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 
-from .const import CUT_HEIGHT_CONFIRM_S, DOMAIN
+from .const import CUT_HEIGHT_CONFIRM_S, DOMAIN, model_lacks
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
 
@@ -134,11 +135,32 @@ async def async_setup_entry(
         # so a mower gets exactly one of the two.
         if desc.key == "cut_height":
             return data.get("cut_height_control") == "slider"
-        return True
+        return not model_lacks(data.get("model"), desc.key)
 
-    async_add_entities(
-        NavimowNumber(coordinator, desc) for desc in NUMBERS if _supported(desc)
-    )
+    def _ruled_out(desc: NavimowNumberDescription) -> bool:
+        """Excluded on the mower's own evidence, not for want of data.
+
+        Only these are pruned from the registry. A setting missing from one
+        snapshot may be back in the next; a family that has no charge limit, or
+        a cutting height that became a read-only sensor, will not.
+        """
+        if desc.key == "cut_height":
+            return data.get("cut_height_control") == "sensor"
+        return model_lacks(data.get("model"), desc.key)
+
+    registry = er.async_get(hass)
+    keep = []
+    for desc in NUMBERS:
+        if _supported(desc):
+            keep.append(NavimowNumber(coordinator, desc))
+        elif settings and _ruled_out(desc):
+            # e.g. the charge-limit slider X3 owners had until now, which the
+            # Navimow app does not offer them, or the cutting-height slider an i1
+            # got in 0.6.5 -- otherwise left behind as dead entities.
+            stale = registry.async_get_entity_id("number", DOMAIN, f"{coordinator.sn}_{desc.key}")
+            if stale:
+                registry.async_remove(stale)
+    async_add_entities(keep)
 
 
 class NavimowNumber(NavimowEntity, NumberEntity):

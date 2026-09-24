@@ -48,6 +48,7 @@ from .const import (
     ERROR_CODES,
     TRAIL_DECIDE_POLLS,
     cut_height_control,
+    model_lacks,
     ERROR_RESUME_HINT,
     is_docked,
     state_activity,
@@ -1412,6 +1413,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             settings.get("cut_height"),
             snapshot["cut_height_supported"],
             snapshot["cut_height_options"],
+            remote=not model_lacks(snapshot["model"], "cut_height_remote"),
         )
         return snapshot
 

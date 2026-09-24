@@ -272,6 +272,10 @@ async def async_setup_entry(
         if desc.exists_fn is None or desc.exists_fn(data):
             keep.append(NavimowSensor(coordinator, desc))
             continue
+        if not data.get("settings"):
+            # No settings in this snapshot: a decision made on nothing. Prune
+            # only on real data, or a failed first read would delete entities.
+            continue
         # A conditional sensor this mower no longer gets (the read-only cutting
         # height of 0.6.3, now a slider on most models) would otherwise linger
         # in the registry as a dead "unavailable" entity next to its replacement.
