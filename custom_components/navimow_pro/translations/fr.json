@@ -237,6 +237,21 @@
         "name": "Durée du report de tonte en cas de pluie"
       }
     },
+    "event": {
+      "mower_event": {
+        "name": "Événements de la tondeuse",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "mowing_started": "Tonte démarrée",
+              "returned_to_dock": "Retour à la base",
+              "mowing_finished": "Tonte terminée",
+              "error": "Erreur"
+            }
+          }
+        }
+      }
+    },
     "camera": {
       "map": {
         "name": "Carte"

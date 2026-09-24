@@ -237,6 +237,21 @@
         "name": "Tempo di ritardo pioggia"
       }
     },
+    "event": {
+      "mower_event": {
+        "name": "Eventi del rasaerba",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "mowing_started": "Taglio avviato",
+              "returned_to_dock": "Rientrato alla base",
+              "mowing_finished": "Taglio completato",
+              "error": "Errore"
+            }
+          }
+        }
+      }
+    },
     "camera": {
       "map": {
         "name": "Mappa"
