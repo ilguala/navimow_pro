@@ -1,0 +1,257 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Navimow (Private) Anmeldung",
+        "description": "Gib E-Mail und Passwort des Segway/Navimow-Kontos ein, dem der Mähroboter gehört (oder für das er freigegeben wurde). Tipp: Verwende ein eigenes Konto, für das der Mähroboter freigegeben ist, damit die Sitzung auf deinem Handy nicht gestört wird.",
+        "data": {
+          "email": "E-Mail",
+          "password": "Passwort",
+          "region": "Serverregion"
+        }
+      },
+      "select_vehicle": {
+        "title": "Mähroboter auswählen",
+        "description": "Auf diesem Konto wurde mehr als ein Mähroboter gefunden.",
+        "data": {
+          "vehicle_sn": "Mähroboter"
+        }
+      },
+      "manual": {
+        "title": "Seriennummer des Mähroboters eingeben",
+        "description": "Auf diesem Konto ist kein Mähroboter aufgeführt (bei einem freigegebenen Konto ist das normal). Gib die Seriennummer des Mähroboters ein (in der Navimow-App unter den Geräteinformationen, z. B. S4THAxxxxxxxxxx). Sie wird mit einer Live-Abfrage geprüft.",
+        "data": {
+          "vehicle_sn": "Seriennummer",
+          "vehicle_name": "Name (optional)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Navimow erneut anmelden",
+        "description": "Die gespeicherte Sitzung ist abgelaufen. Gib das Passwort des Kontos erneut ein.",
+        "data": {
+          "email": "E-Mail",
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "password_too_long": "Dieses Passwort wurde abgelehnt. Die Navimow-App akzeptiert nur Passwörter mit 6–18 Zeichen und behält bei einem längeren nur die ersten 18, daher passt ein längeres Passwort hier nie. Versuche es mit den ersten 18 Zeichen oder setze in der App ein kürzeres Passwort.",
+      "account_not_found": "Dieses Konto wurde auf keinem Navimow-Server gefunden. Prüfe die Adresse oder wähle unten die Serverregion manuell aus.",
+      "invalid_auth": "E-Mail oder Passwort ungültig.",
+      "cannot_connect": "Die Navimow-Cloud ist nicht erreichbar. Versuche es erneut.",
+      "cloud_refused": "Die Navimow-Cloud hat geantwortet, die Anfrage aber abgelehnt (Code {code}). Das ist kein Netzwerk- oder Regionsproblem, ein Wechsel der Region hilft also nicht. Bitte melde diesen Code.",
+      "no_vehicles": "Diesem Konto ist kein Mähroboter zugeordnet.",
+      "vehicle_not_found": "Diese Seriennummer konnte mit diesem Konto nicht abgefragt werden. Prüfe die Seriennummer und ob der Mähroboter für dieses Konto freigegeben ist.",
+      "unknown": "Unerwarteter Fehler. Prüfe die Protokolle."
+    },
+    "abort": {
+      "already_configured": "Dieser Mähroboter ist bereits eingerichtet.",
+      "reauth_successful": "Die erneute Anmeldung war erfolgreich."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Navimow-Optionen",
+        "description": "Zonenliste für die Zonenauswahl, als kommagetrennte Liste von id:Name-Paaren (zum Beispiel: 1:Zone 1,5:Zone 2). Die Regions-ID ist die ID der Kartenpartition. Leer lassen, um die automatische Erkennung zu verwenden.",
+        "data": {
+          "zones": "Zonen (id:Name,...)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lawn_mower": {
+      "mower": {
+        "name": "Mähroboter"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Akku"
+      },
+      "state": {
+        "name": "Status"
+      },
+      "state_code": {
+        "name": "Statuscode"
+      },
+      "mowing_progress": {
+        "name": "Mähfortschritt"
+      },
+      "current_zone": {
+        "name": "Aktuelle Zone"
+      },
+      "session_area": {
+        "name": "Fläche dieses Mähvorgangs"
+      },
+      "weekly_area": {
+        "name": "Fläche diese Woche"
+      },
+      "total_area": {
+        "name": "Gesamtfläche"
+      },
+      "next_mow": {
+        "name": "Nächster Mähvorgang"
+      },
+      "error_text": {
+        "name": "Fehler"
+      },
+      "signal_wifi": {
+        "name": "WLAN-Signal"
+      },
+      "position_x": {
+        "name": "Position X"
+      },
+      "position_y": {
+        "name": "Position Y"
+      },
+      "heading": {
+        "name": "Fahrtrichtung"
+      },
+      "blades_life": {
+        "name": "Lebensdauer Messer"
+      },
+      "chassis_life": {
+        "name": "Lebensdauer Fahrwerk"
+      },
+      "schedule": {
+        "name": "Zeitplan"
+      },
+      "coverage": {
+        "name": "Abdeckung"
+      },
+      "cut_height": {
+        "name": "Schnitthöhe"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Mähplan"
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      },
+      "online": {
+        "name": "Online"
+      },
+      "docked": {
+        "name": "In der Ladestation"
+      }
+    },
+    "switch": {
+      "schedule_enabled": {
+        "name": "Mähplan aktiv"
+      },
+      "night_mow": {
+        "name": "Nachtmähen"
+      },
+      "rain_sensor": {
+        "name": "Regensensor (am Mähroboter)"
+      },
+      "rain_detection": {
+        "name": "Automatische Pause bei Regen"
+      },
+      "sound": {
+        "name": "Ton"
+      },
+      "power_saving": {
+        "name": "Energiesparmodus"
+      },
+      "child_lock": {
+        "name": "Kindersicherung"
+      },
+      "lift_alarm": {
+        "name": "Hebealarm"
+      },
+      "mowing_cycle": {
+        "name": "Zyklisches Mähen"
+      },
+      "frost_delay": {
+        "name": "Verzögerung bei Frost"
+      },
+      "snow_delay": {
+        "name": "Verzögerung bei Schnee"
+      },
+      "storm_delay": {
+        "name": "Verzögerung bei starkem Wind"
+      },
+      "high_temp_delay": {
+        "name": "Verzögerung bei Hitze"
+      },
+      "efls": {
+        "name": "Kamera-Positionierung (EFLS)"
+      },
+      "obstacle_avoidance": {
+        "name": "Hinderniserkennung"
+      },
+      "traction_control": {
+        "name": "Traktionskontrolle"
+      },
+      "animal_protection": {
+        "name": "Tierschutz"
+      },
+      "night_light": {
+        "name": "Nachtlicht"
+      },
+      "weather_rain": {
+        "name": "Regenpause (Wettervorhersage)"
+      },
+      "rain_delay_mode": {
+        "name": "Nach Regen vor dem Fortsetzen warten"
+      }
+    },
+    "select": {
+      "zone": {
+        "name": "Mähzone"
+      },
+      "night_light_level": {
+        "name": "Helligkeit Nachtlicht",
+        "state": {
+          "dim": "Gedimmt",
+          "very_dim": "Stark gedimmt"
+        }
+      },
+      "weather_sensitivity": {
+        "name": "Regenempfindlichkeit",
+        "state": {
+          "drizzle": "Nieselregen",
+          "light": "Leichter Regen",
+          "moderate": "Mäßiger Regen"
+        }
+      }
+    },
+    "number": {
+      "cut_height": {
+        "name": "Schnitthöhe"
+      },
+      "return_battery_level": {
+        "name": "Akkustand für Rückkehr zur Ladestation"
+      },
+      "charging_limit": {
+        "name": "Ladegrenze"
+      },
+      "rain_delay_time": {
+        "name": "Wartezeit nach Regen"
+      }
+    },
+    "camera": {
+      "map": {
+        "name": "Karte"
+      }
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Automatisch erkennen",
+        "fra": "Europa (fra)",
+        "sg": "Asien-Pazifik (sg)",
+        "us": "Amerika (us)",
+        "bj": "China (bj)"
+      }
+    }
+  }
+}
