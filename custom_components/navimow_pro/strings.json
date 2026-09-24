@@ -237,6 +237,21 @@
         "name": "Rain delay time"
       }
     },
+    "event": {
+      "mower_event": {
+        "name": "Mower events",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "mowing_started": "Mowing started",
+              "returned_to_dock": "Returned to dock",
+              "mowing_finished": "Mowing finished",
+              "error": "Error"
+            }
+          }
+        }
+      }
+    },
     "camera": {
       "map": {
         "name": "Map"
