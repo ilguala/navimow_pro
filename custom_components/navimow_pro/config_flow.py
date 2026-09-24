@@ -27,6 +27,9 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -55,7 +58,11 @@ from .const import (
     CONF_VEHICLE_SN,
     CONF_VEHICLE_TYPE,
     DEFAULT_LANGUAGE,
+    DEFAULT_MOWER_SCALE,
     DOMAIN,
+    MOWER_SCALE_MAX,
+    MOWER_SCALE_MIN,
+    OPT_MOWER_SCALE,
     OPT_ZONES,
     PASSWORD_MAX_LEN,
     REGION_AUTO,
@@ -443,7 +450,7 @@ class NavimowConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class NavimowOptionsFlow(OptionsFlow):
-    """Let the user configure the zone list used by the zone select entity."""
+    """Let the user configure the zone list and the mower's size on the map."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         # Store on a private attr to stay compatible across HA versions
@@ -454,13 +461,32 @@ class NavimowOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data={OPT_ZONES: user_input.get(OPT_ZONES, "")})
+            return self.async_create_entry(
+                data={
+                    OPT_ZONES: user_input.get(OPT_ZONES, ""),
+                    OPT_MOWER_SCALE: int(
+                        user_input.get(OPT_MOWER_SCALE, DEFAULT_MOWER_SCALE)
+                    ),
+                }
+            )
 
-        current = self._entry.options.get(OPT_ZONES, "")
+        options = self._entry.options
         schema = vol.Schema(
             {
-                vol.Optional(OPT_ZONES, default=current): TextSelector(
+                vol.Optional(OPT_ZONES, default=options.get(OPT_ZONES, "")): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.TEXT)
+                ),
+                vol.Optional(
+                    OPT_MOWER_SCALE,
+                    default=options.get(OPT_MOWER_SCALE, DEFAULT_MOWER_SCALE),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MOWER_SCALE_MIN,
+                        max=MOWER_SCALE_MAX,
+                        step=10,
+                        unit_of_measurement="%",
+                        mode=NumberSelectorMode.SLIDER,
+                    )
                 ),
             }
         )
