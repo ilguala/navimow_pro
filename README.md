@@ -92,9 +92,13 @@ Worth knowing before you rely on it:
 
 The `camera` entity draws a live map in the style of the mobile app: each zone
 with the share of it already cut, the perimeter drawn dashed where it is a
-virtual boundary and solid where it is a physical edge, obstacles and no-mow
-areas, the charging station, the mower's current position, and the mowed trail
-built up as it works. It survives restarts.
+virtual boundary and solid where it is a physical edge, the channels that link
+zones, obstacles, no-mow areas in blue, the charging station, the mower's current
+position, and the mowed trail built up as it works. It survives restarts.
+
+Zone labels follow the app: a label is drawn only where it fits entirely inside
+its zone -- the name and percentage on a large zone, the percentage alone on a
+smaller one, nothing on a zone too small to hold either.
 
 There are no screenshots here: the ones that used to be were of a real garden.
 
@@ -221,9 +225,14 @@ unavailable or reads `unknown` rather than the integration crashing:
   trail is reconstructed by sampling the mower's position while it cuts, since
   the exact swept path is not available; it is persisted across restarts and is
   an approximation.
-- **Cutting height** is read on every model that reports one, and writable on
-  models that have a motor for it. Whether a written value sticks has been
-  confirmed on some models and not others.
+- **Cutting height** is read on every model that reports one. It is offered as
+  a slider on models that list the heights they accept, except families known to
+  have a manual knob (the i1). Every change is read back half a minute later, and
+  a notification says so if the mower did not apply it.
+- **Features a model family lacks.** Every model reports much the same settings,
+  so a field being present is not proof the feature exists. A short list of
+  field-confirmed exceptions hides what a family does not have -- currently no
+  remote cutting height on the i1, and no charge limit on the X3.
 - **Zone ids in services.** `mow` and `set_schedule` refuse zone ids the decoded
   map does not contain — but only once the map has actually decoded. On a
   firmware whose map never arrives, nothing is checked, because refusing a

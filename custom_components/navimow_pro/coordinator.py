@@ -232,6 +232,23 @@ def _boundary_points(points: Any) -> tuple[list[list[float]], list[int | None]]:
     return poly, flags
 
 
+def _enum_label(value: Any) -> str:
+    """A categorical field as a short, safe label for the inventory.
+
+    Numbers pass as they are; a string only if it looks like an identifier
+    ("TUNNEL", "channel_2"). Anything else -- free text, a name someone typed --
+    becomes "?", so this can never carry what a user wrote.
+    """
+    if isinstance(value, bool) or value is None:
+        return "?"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if 0 < len(text) <= 24 and text.replace("_", "").replace("-", "").isalnum():
+        return text
+    return "?"
+
+
 _SHAPE_DEPTH = 5
 _SHAPE_KEYS = 24
 
@@ -318,6 +335,24 @@ def _extract_geometry(geom: dict) -> dict:
         for vo in (geom.get("vision_off_areas") or [])
         if isinstance(vo, dict) and (pts := _points_xy(vo.get("points")))
     ]
+    # Channels between zones -- the connecting paths the app draws as thin grey
+    # lines (#15). Layout from a 0.6.4 diagnostics shape: each tunnel carries the
+    # two zone ids it links ("connection"), a name, and [x, y, flag] points in the
+    # same frame as the boundaries. One mower reported nine where its app shows
+    # two, so the kinds are counted in the inventory below until it is clear which
+    # ones the app leaves out.
+    tunnels: list[dict] = []
+    tunnel_kinds: dict[str, int] = {}
+    for tn in geom.get("tunnels") or []:
+        if not isinstance(tn, dict):
+            continue
+        kind = f"{_enum_label(tn.get('type'))}/{_enum_label(tn.get('tunnel_type'))}"
+        tunnel_kinds[kind] = tunnel_kinds.get(kind, 0) + 1
+        pts = _points_xy(tn.get("points"))
+        if len(pts) < 2:
+            continue
+        link = [z for z in (tn.get("connection") or []) if _as_int(z) is not None]
+        tunnels.append({"points": pts, "zones": [_as_int(z) for z in link], "kind": kind})
     # What the blob actually holds, as names and counts only -- never values.
     # The decoder reads sub_maps, obstacles and vision_off_areas, and inside a
     # sub-map only BOUNDARY and CHARGING_PILE; anything else is dropped in
@@ -340,6 +375,7 @@ def _extract_geometry(geom: dict) -> dict:
         "obstacles": obstacles,
         "vision_off": vision_off,
         "station": station,
+        "tunnels": tunnels,
         "inventory": {
             "keys": sorted(str(k) for k in geom),
             "sub_maps": len(geom.get("sub_maps") or []),
@@ -355,7 +391,10 @@ def _extract_geometry(geom: dict) -> dict:
                 if k != "sub_maps"
             },
             "decoded": ["sub_maps/BOUNDARY", "sub_maps/CHARGING_PILE",
-                        "obstacles", "vision_off_areas"],
+                        "obstacles", "vision_off_areas", "tunnels"],
+            # How many tunnels of each type/tunnel_type -- enum labels and counts,
+            # no geometry. Which of them the app actually shows is still open.
+            "tunnel_kinds": dict(sorted(tunnel_kinds.items())),
         },
     }
 
@@ -1372,6 +1411,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                     "vision_off": map_geom.get("vision_off") or [],
                     "station": map_geom.get("station"),
                     "station_map": map_geom.get("station_map"),
+                    "tunnels": map_geom.get("tunnels") or [],
                 }
                 if map_geom
                 else None

@@ -50,15 +50,17 @@ _TRAIL_COLOR = "#43a047"    # mowed layer (opaque, flattened via group opacity)
 _TRAIL_OPACITY = 0.40       # applied to the WHOLE trail group -> no compounding
 _MOWER_ORANGE = "#ff6d00"
 _OBSTACLE_FILL = "#616161"
-_NOMOW_FILL = "#bdbdbd"
+# No-mow areas in the app's blue, so they are not mistaken for obstacles (#12).
+_NOMOW_FILL = "#90caf9"
+_NOMOW_STROKE = "#42a5f5"
+_CHANNEL_STROKE = "#90a4ae"  # channels between zones: the app's thin grey path
 
-# Zone labels shrink to fit their zone between these sizes. At _LABEL_MAX a pill
-# is exactly the one every earlier version drew, so a map of large zones does not
-# change; only labels that would have swamped a small zone get smaller.
-_LABEL_MAX = 15.0
-# Not lower: a label nobody can read is worse than one that covers a strip. 12 is
-# just under the legend (13) and the status line (14), the smallest text drawn.
-_LABEL_MIN = 12.0
+# Zone labels shrink to fit their zone between these sizes -- smaller than the
+# legend (13) and status line (14) on purpose: at 15, on a many-zone map, the
+# labels were the loudest thing in the picture (#12). The app's labels are quiet
+# and so are these.
+_LABEL_MAX = 12.0
+_LABEL_MIN = 10.0
 # Nudges tried when a label's centroid is taken, as fractions of the label's own
 # width and height. Small steps first: a thin diagonal zone may have room for its
 # label only a few pixels from the centre, which a jump of a whole line misses.
@@ -108,8 +110,10 @@ def _inside(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
     return inside
 
 
-def _covers(box, points) -> bool:
-    return any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for x, y in points)
+def _box_inside(box, poly) -> bool:
+    """Whether all four corners of a label box lie inside the polygon."""
+    x0, y0, x1, y1 = box
+    return all(_inside(x, y, poly) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
 
 
 def _boxes_overlap(a, b, gap: float = 2.0) -> bool:
@@ -117,52 +121,47 @@ def _boxes_overlap(a, b, gap: float = 2.0) -> bool:
 
 
 def _place_labels(labels, reserved, view: float):
-    """Size each zone label to its zone and move it off the others.
+    """Label each zone the way the app does: only where the label fits inside it.
 
-    ``labels`` are (x, y, text, zone_width_px, zone_area_px, zone_polygon_px);
-    ``reserved`` are boxes no label may cover -- legend, status line, dock,
-    mower. Larger zones are placed first, so a big zone keeps its label dead
-    centre and a small one is what gets nudged.
+    ``labels`` are (x, y, texts, zone_width_px, zone_area_px, zone_polygon_px),
+    ``texts`` the choices from most to least informative -- "name · 83%", then
+    "83%". ``reserved`` are boxes no label may cover: legend, status line, dock,
+    mower.
 
-    Candidate spots form a grid of nudges around the centroid (_LABEL_STEPS_*),
-    tried nearest first and always inside the picture. The nearest free spot
-    whose centre lies inside the label's own zone wins: a label pushed onto the
-    NEIGHBOURING zone reads as that zone's name, which is worse than one a little
-    off centre. Failing that, the nearest free spot whose pill covers no other
-    zone's centroid, so a label that cannot sit on its own zone does not take the
-    place another one needs -- checked on the whole pill, since a label several
-    times wider than a small zone can have its centre on empty ground and its body
-    on the neighbour. Then the nearest free spot anywhere, and last the centroid,
-    because a label in the wrong place still names the zone.
+    A label is drawn only where its whole pill lies inside its own zone and
+    clear of everything already placed. The name and percentage if they fit,
+    otherwise the percentage alone, otherwise nothing -- which is what the app
+    does with a small zone, and what makes a label unable to spill onto a
+    neighbour or read as another zone's name (#12: at one fixed size, on a
+    nine-zone map, the labels were wider than the strips they named and sat on
+    top of one another). Larger zones go first; each is tried at its centroid,
+    then over a grid of nudges, nearest first.
     """
     boxes = list(reserved)
     placed = []
-    anchors = [(lb[0], lb[1]) for lb in labels]
-    for index, (cx, cy, text, width_px, _area, poly) in sorted(
-        enumerate(labels), key=lambda item: -item[1][4]
-    ):
-        others = [a for i, a in enumerate(anchors) if i != index]
-        size = max(_LABEL_MIN, min(_LABEL_MAX, width_px / (len(text) * 0.58 + 1.2)))
-        x0, y0, x1, y1 = _label_box(cx, cy, text, size)
-        w, h = x1 - x0, y1 - y0
-        free = []
-        nudges = sorted(
-            ((fx * w, fy * h) for fx in _LABEL_STEPS_X for fy in _LABEL_STEPS_Y),
-            key=lambda d: d[0] * d[0] + d[1] * d[1],
-        )
-        for dx, dy in nudges:
-            cand = _label_box(cx + dx, cy + dy, text, size)
-            if cand[0] < 0 or cand[1] < 0 or cand[2] > view or cand[3] > view:
-                continue
-            if not any(_boxes_overlap(cand, b) for b in boxes):
-                free.append((cx + dx, cy + dy))
-        spot = next((p for p in free if _inside(p[0], p[1], poly)), None)
-        if spot is None:
-            spot = next((p for p in free if not _covers(_label_box(p[0], p[1], text, size), others)), None)
-        if spot is None:
-            spot = free[0] if free else (cx, cy)
-        boxes.append(_label_box(spot[0], spot[1], text, size))
-        placed.append((spot[0], spot[1], text, size))
+    for cx, cy, texts, _width, _area, poly in sorted(labels, key=lambda lb: -lb[4]):
+        xs = [p[0] for p in poly]
+        zone_w = max(xs) - min(xs)
+        for text in texts:
+            size = max(_LABEL_MIN, min(_LABEL_MAX, zone_w / (len(text) * 0.58 + 1.2)))
+            x0, y0, x1, y1 = _label_box(cx, cy, text, size)
+            w, h = x1 - x0, y1 - y0
+            nudges = sorted(
+                ((fx * w, fy * h) for fx in _LABEL_STEPS_X for fy in _LABEL_STEPS_Y),
+                key=lambda d: d[0] * d[0] + d[1] * d[1],
+            )
+            spot = None
+            for dx, dy in nudges:
+                cand = _label_box(cx + dx, cy + dy, text, size)
+                if cand[0] < 0 or cand[1] < 0 or cand[2] > view or cand[3] > view:
+                    continue
+                if _box_inside(cand, poly) and not any(_boxes_overlap(cand, b) for b in boxes):
+                    spot = (cx + dx, cy + dy)
+                    break
+            if spot is not None:
+                boxes.append(_label_box(spot[0], spot[1], text, size))
+                placed.append((spot[0], spot[1], text, size))
+                break
     return placed
 
 
@@ -201,6 +200,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
         obstacles = mp.get("obstacles") or []
         vision_off = mp.get("vision_off") or []
         station = mp.get("station") or None
+        tunnels = mp.get("tunnels") or []
 
         pos = data.get("position") or {}
         px, py = pos.get("x"), pos.get("y")
@@ -223,6 +223,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
         stable: list[list[float]] = []
         for z in zones:
             stable.extend(z.get("polygon") or [])
+        for tn in tunnels:
+            stable.extend(tn.get("points") or [])
         for ob in obstacles:
             stable.extend(ob)
         for vo in vision_off:
@@ -279,11 +281,24 @@ class NavimowMapCamera(NavimowEntity, Camera):
             f'viewBox="0 0 {_VIEW} {_VIEW}">'
         ]
 
+        # Channels between zones, drawn first so the zones sit over them: the
+        # stretch across open ground reads at full strength, the part inside a
+        # zone only through its light fill -- which is how the app shows them.
+        for tn in tunnels:
+            pts = tn.get("points") or []
+            if len(pts) < 2:
+                continue
+            path = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in pts)
+            parts.append(
+                f'<polyline points="{path}" fill="none" stroke="{_CHANNEL_STROKE}" '
+                f'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+            )
+
         # Zones: soft uniform green fill (no border) + a per-segment perimeter
         # (dashed for virtual-boundary edges, solid for ride-on/straddle edges),
         # mirroring the app. Labels are collected and drawn LAST so they sit above
         # the mowed layer.
-        zone_labels: list[tuple[float, float, str, float, float, list]] = []
+        zone_labels: list[tuple[float, float, list, float, float, list]] = []
         for z in zones:
             poly = z.get("polygon") or []
             if len(poly) < 3:
@@ -299,9 +314,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
             width_px = max(p[0] for p in screen) - min(p[0] for p in screen)
             zname = str(z.get("name") or "")
             zpct = cov_by_id.get(z.get("id"))
-            zlabel = f"{zname} · {zpct}%" if zpct is not None else zname
-            if zlabel:
-                zone_labels.append((cx, cy, zlabel, width_px, area_px, screen))
+            if zpct is None:
+                texts = [zname] if zname else []
+            elif zname:
+                texts = [f"{zname} · {zpct}%", f"{zpct}%"]
+            else:
+                texts = [f"{zpct}%"]
+            if texts:
+                zone_labels.append((cx, cy, texts, width_px, area_px, screen))
 
         # Obstacles (dark gray fill).
         for ob in obstacles:
@@ -313,15 +333,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 f'stroke="#424242" stroke-width="1.5" stroke-linejoin="round"/>'
             )
 
-        # Vision-off / no-mow areas (light gray, dashed).
+        # Vision-off / no-mow areas, in the app's blue.
         for vo in vision_off:
             if len(vo) < 3:
                 continue
             pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in vo)
             parts.append(
                 f'<polygon points="{pts_str}" fill="{_NOMOW_FILL}" fill-opacity="0.30" '
-                f'stroke="#9e9e9e" stroke-width="1.5" stroke-dasharray="6 4" '
-                f'stroke-linejoin="round"/>'
+                f'stroke="{_NOMOW_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>'
             )
 
         # Mowed trail: a single flat translucent green layer. Each pass is drawn
@@ -502,8 +521,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
         h = y1 - y0
         return (
             f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{x1 - x0:.1f}" height="{h:.1f}" '
-            f'rx="{h / 2.0:.1f}" fill="#eceff1" fill-opacity="0.85" '
-            f'stroke="#b0bec5" stroke-width="1"/>'
+            f'rx="{h / 2.0:.1f}" fill="#eceff1" fill-opacity="0.72"/>'
             f'<text x="{cx:.1f}" y="{cy + size * 0.35:.1f}" text-anchor="middle" '
             f'font-family="sans-serif" font-size="{size:.1f}" font-weight="600" '
             f'fill="#37474f">{safe}</text>'
