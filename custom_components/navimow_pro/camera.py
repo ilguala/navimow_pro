@@ -18,8 +18,9 @@ from __future__ import annotations
 import html
 import logging
 import math
+import time
 
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, async_get_still_stream
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -184,6 +185,15 @@ def _place_labels(labels, reserved, view: float):
     return placed
 
 
+# The pop-up that opens on the map streams it, and Home Assistant sends a new
+# picture only when it changes -- a docked mower's map may not for minutes. A
+# reverse proxy closes a stream that stays silent (nginx after 60 s by default)
+# and cuts it off mid-response, which makes the browser drop the picture: the
+# pop-up went black after about a minute (#15). So the same map goes out again
+# every _KEEPALIVE_S seconds, marked with a comment so that it counts as new.
+_KEEPALIVE_S = 15
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -195,6 +205,10 @@ class NavimowMapCamera(NavimowEntity, Camera):
     """An SVG map of the lawn: zones, obstacles, no-mow areas, dock, mower."""
 
     _attr_translation_key = "map"
+    # How often the pop-up's stream asks for the map. The data behind it changes
+    # every few seconds at most, so twice a second (the default) redrew the same
+    # picture for nothing.
+    _attr_frame_interval = 2.0
     # Built-in size until __init__ reads the option, so a camera built without
     # one -- as the tests do -- still draws the mower.
     _mower_scale = 1.0
@@ -219,6 +233,19 @@ class NavimowMapCamera(NavimowEntity, Camera):
         except Exception:  # noqa: BLE001 - a camera must never crash the platform
             _LOGGER.debug("Failed to render Navimow map", exc_info=True)
             return self._placeholder("map unavailable").encode("utf-8")
+
+    async def handle_async_mjpeg_stream(self, request):
+        """Stream the map to the pop-up, never silent long enough to be cut off."""
+
+        async def frame() -> bytes | None:
+            image = await self.async_camera_image()
+            if not image:
+                return image
+            return image + b"<!-- %d -->" % (int(time.monotonic()) // _KEEPALIVE_S)
+
+        return await async_get_still_stream(
+            request, frame, self.content_type, self.frame_interval
+        )
 
     # ------------------------------------------------------------------ render
     def _render(self) -> str:
