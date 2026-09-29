@@ -95,7 +95,11 @@ with the share of it already cut, the perimeter drawn dashed where it is a
 virtual boundary and solid where it is a physical edge, the channels that link
 zones, off-limit areas in orange and VisionFence-off areas in blue (as the app
 colours them), the charging station, the mower's current
-position, and the mowed trail built up as it works. It survives restarts.
+position (on the dock while it is docked), and the mowed trail built up as it
+works. The trail is kept zone by zone, so a job that runs over several days keeps
+its first zones, and a zone's trail is cleared only when the mower starts that
+zone over. A finished zone is painted mowed edge to edge, as the app does. It all
+survives restarts.
 
 Zone labels follow the app: a label is drawn only where it fits entirely inside
 its zone -- the name and percentage on a large zone, the percentage alone on a
@@ -228,7 +232,8 @@ unavailable or reads `unknown` rather than the integration crashing:
 - **Mowed trail.** Per-zone coverage percentages come from the mower. The drawn
   trail is reconstructed by sampling the mower's position while it cuts, since
   the exact swept path is not available; it is persisted across restarts and is
-  an approximation.
+  an approximation. On a mower that reports no per-zone percentages, a mow that
+  leaves the dock with the working zone at 0 % is taken as a new job.
 - **Cutting height** is read on every model that reports one. It is offered as
   a slider on models that list the heights they accept, except families known to
   have a manual knob (the i1). Every change is read back half a minute later, and

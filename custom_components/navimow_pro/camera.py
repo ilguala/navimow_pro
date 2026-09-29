@@ -233,6 +233,11 @@ class NavimowMapCamera(NavimowEntity, Camera):
         pos = data.get("position") or {}
         px, py = pos.get("x"), pos.get("y")
         heading = pos.get("heading")
+        # A docked mower is on its dock. The position the cloud reports there
+        # lags: for a while after docking it is still the last spot on the lawn,
+        # so the mower was drawn beside the dock until much later (#15).
+        if data.get("docked") and station and station.get("x") is not None and station.get("y") is not None:
+            px, py = station["x"], station["y"]
 
         # Per-zone coverage % (from get-path-info-time) and the reconstructed
         # mowed trail ([[x,y],...] accumulated while cutting).
@@ -243,6 +248,10 @@ class NavimowMapCamera(NavimowEntity, Camera):
             if z.get("id") is not None
         }
         trail = data.get("trail") or []
+        # One trail per zone when the coordinator keeps them so, else the whole
+        # lawn as one (no zone to know it by).
+        trail_zones = data.get("trail_zones")
+        runs = list(trail_zones.items()) if isinstance(trail_zones, dict) else [(None, trail)]
 
         # Bounding box: derive it from the STABLE geometry (zones/off-limit/
         # VisionFence-off/channels/dock) first, then include only the dynamic points (mower +
@@ -338,7 +347,78 @@ class NavimowMapCamera(NavimowEntity, Camera):
             if texts:
                 zone_labels.append((cx, cy, texts, width_px, area_px, screen))
 
+        # Mowed trail: a single flat translucent green layer. Each pass is drawn
+        # OPAQUE inside one <g opacity=...> group -> the group is flattened before
+        # the opacity is applied, so overlapping passes never compound into darker
+        # patches (this is what made the old per-line stroke-opacity look ugly).
+        # Points are lightly smoothed per segment to remove GPS zig-zag.
+        #
+        # A zone the cloud reports finished is painted mowed edge to edge, as the
+        # app does: sampled every few seconds, the trail always leaves gaps
+        # between passes, and a finished zone read as patchy (#15). Its trail is
+        # then not drawn at all.
+        finished = {zid for zid, pct in cov_by_id.items() if pct is not None and pct >= 100}
+        trail_parts: list[str] = []
+        for z in zones:
+            poly = z.get("polygon") or []
+            if z.get("id") in finished and len(poly) >= 3:
+                pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
+                trail_parts.append(f'<polygon points="{pts_str}" fill="{_TRAIL_COLOR}"/>')
+        if any(len(pts) >= 2 for zid, pts in runs if zid not in finished):
+            swath = self.data.get("swath_width_m") or SWATH_WIDTH_M
+            stroke_w = min(max(swath * scale, 6.0), 32.0)
+            break_sq = TRAIL_BREAK_M * TRAIL_BREAK_M
+            # Samples closer than 1.5 px on screen add nothing but size: with a
+            # trail per zone the map can hold several times the points it did.
+            step_sq = (1.5 / scale) ** 2
+            for zid, pts in runs:
+                if zid in finished:
+                    continue
+                segments: list[list[list[float]]] = [[]]
+                prev: list[float] | None = None
+                for x, y in pts:
+                    if prev is not None:
+                        dx, dy = x - prev[0], y - prev[1]
+                        gap = dx * dx + dy * dy
+                        if gap > break_sq:
+                            segments.append([])
+                        elif gap < step_sq:
+                            continue
+                    segments[-1].append([x, y])
+                    prev = [x, y]
+                for seg in segments:
+                    seg = self._smooth(seg)
+                    if len(seg) >= 2:
+                        pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in seg)
+                        trail_parts.append(
+                            f'<polyline points="{pts_str}" fill="none" '
+                            f'stroke="{_TRAIL_COLOR}" stroke-width="{stroke_w:.1f}" '
+                            f'stroke-linecap="round" stroke-linejoin="round"/>'
+                        )
+        mowed = bool(trail_parts)
+        if trail_parts:
+            # Clipped to the zones. The mower only cuts inside them, so any
+            # trail outside is travel -- a trip down a channel -- or half the
+            # swath hanging over an edge it was following. The app draws
+            # neither, and #15 read both as the mower leaving its boundaries.
+            # With no zone geometry yet the trail is drawn as it is.
+            clip = ""
+            zone_polys = [z.get("polygon") for z in zones if len(z.get("polygon") or []) >= 3]
+            if zone_polys:
+                shapes = "".join(
+                    '<polygon points="%s"/>'
+                    % " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
+                    for poly in zone_polys
+                )
+                parts.append(f'<defs><clipPath id="zones">{shapes}</clipPath></defs>')
+                clip = ' clip-path="url(#zones)"'
+            parts.append(
+                f'<g opacity="{_TRAIL_OPACITY}"{clip}>{"".join(trail_parts)}</g>'
+            )
+
         # Off-limit areas (the map's "obstacles"), outlined in the app's orange.
+        # Over the mowed layer, as in the app, so a finished zone painted green
+        # edge to edge does not cover them.
         for ob in obstacles:
             if len(ob) < 3:
                 continue
@@ -357,55 +437,6 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 f'<polygon points="{pts_str}" fill="{_VISION_OFF_FILL}" fill-opacity="0.30" '
                 f'stroke="{_VISION_OFF_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>'
             )
-
-        # Mowed trail: a single flat translucent green layer. Each pass is drawn
-        # OPAQUE inside one <g opacity=...> group -> the group is flattened before
-        # the opacity is applied, so overlapping passes never compound into darker
-        # patches (this is what made the old per-line stroke-opacity look ugly).
-        # Points are lightly smoothed per segment to remove GPS zig-zag.
-        if len(trail) >= 2:
-            swath = self.data.get("swath_width_m") or SWATH_WIDTH_M
-            stroke_w = min(max(swath * scale, 6.0), 32.0)
-            break_sq = TRAIL_BREAK_M * TRAIL_BREAK_M
-            segments: list[list[list[float]]] = [[]]
-            prev: list[float] | None = None
-            for x, y in trail:
-                if prev is not None:
-                    dx, dy = x - prev[0], y - prev[1]
-                    if dx * dx + dy * dy > break_sq:
-                        segments.append([])
-                segments[-1].append([x, y])
-                prev = [x, y]
-
-            trail_parts: list[str] = []
-            for seg in segments:
-                seg = self._smooth(seg)
-                if len(seg) >= 2:
-                    pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in seg)
-                    trail_parts.append(
-                        f'<polyline points="{pts_str}" fill="none" '
-                        f'stroke="{_TRAIL_COLOR}" stroke-width="{stroke_w:.1f}" '
-                        f'stroke-linecap="round" stroke-linejoin="round"/>'
-                    )
-            if trail_parts:
-                # Clipped to the zones. The mower only cuts inside them, so any
-                # trail outside is travel -- a trip down a channel -- or half the
-                # swath hanging over an edge it was following. The app draws
-                # neither, and #15 read both as the mower leaving its boundaries.
-                # With no zone geometry yet the trail is drawn as it is.
-                clip = ""
-                zone_polys = [z.get("polygon") for z in zones if len(z.get("polygon") or []) >= 3]
-                if zone_polys:
-                    shapes = "".join(
-                        '<polygon points="%s"/>'
-                        % " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
-                        for poly in zone_polys
-                    )
-                    parts.append(f'<defs><clipPath id="zones">{shapes}</clipPath></defs>')
-                    clip = ' clip-path="url(#zones)"'
-                parts.append(
-                    f'<g opacity="{_TRAIL_OPACITY}"{clip}>{"".join(trail_parts)}</g>'
-                )
 
         # Channels between zones, on top of everything but the markers: drawn
         # under the zones they disappeared into the dashed boundaries they
@@ -428,40 +459,36 @@ class NavimowMapCamera(NavimowEntity, Camera):
         if station and station.get("x") is not None and station.get("y") is not None:
             parts.append(self._station(sx(station["x"]), sy(station["y"])))
 
-        # Mower (robot icon oriented to its heading).
-        if px is not None and py is not None:
-            parts.append(self._mower(sx(px), sy(py), heading, self._mower_scale))
-
         cov_pct = cov.get("overall_pct")
         cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
         label = f"{data.get('state', '')} · {data.get('battery', '?')}%{cov_txt}"
 
         # Zone labels (rounded pills) -- on top of the mowed layer so they read.
         # Sized to their zone and kept off one another, the legend, the status
-        # line, the dock and the mower. With one fixed size, a nine-zone map
-        # (#12) had pills wider than the strips they named, stacked on each
-        # other and on the mower icon.
+        # line and the dock. With one fixed size, a nine-zone map (#12) had pills
+        # wider than the strips they named, stacked on each other. Not kept off
+        # the mower: a label that stepped aside every time it drove past jumped
+        # around the map (#15). The mower is drawn over it instead.
         legend_rows = (
-            1 + (len(trail) >= 2) + (station is not None) + bool(obstacles) + bool(vision_off)
+            1 + mowed + (station is not None) + bool(obstacles) + bool(vision_off)
         )
         reserved = [
             (8.0, 8.0, 8.0 + _LEGEND_W, 16.0 + 20 * legend_rows),
             (8.0, _VIEW - 30.0, 16.0 + len(label) * 14 * 0.58, _VIEW - 4.0),
         ]
-        if px is not None and py is not None:
-            ms = self._mower_scale
-            reserved.append((sx(px) - 16 * ms, sy(py) - 13 * ms, sx(px) + 16 * ms, sy(py) + 13 * ms))
         if station and station.get("x") is not None and station.get("y") is not None:
             stx, sty = sx(station["x"]), sy(station["y"])
             reserved.append((stx - 12, sty - 10, stx + 12, sty + 10))
         for x, y, text, size in _place_labels(zone_labels, reserved, _VIEW):
             parts.append(self._pill_label(x, y, text, size=size))
 
+        # Mower (robot icon oriented to its heading), over the labels.
+        if px is not None and py is not None:
+            parts.append(self._mower(sx(px), sy(py), heading, self._mower_scale))
+
         # Legend + status line.
         parts.append(
-            self._legend(
-                bool(obstacles), bool(vision_off), station is not None, len(trail) >= 2
-            )
+            self._legend(bool(obstacles), bool(vision_off), station is not None, mowed)
         )
         parts.append(self._label(12, _VIEW - 12, label, size=14, anchor="start"))
 

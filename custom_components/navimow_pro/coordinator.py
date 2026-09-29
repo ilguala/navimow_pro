@@ -60,6 +60,7 @@ from .const import (
     STATE_MOWING,
     TRAIL_MAX_POINTS,
     TRAIL_MIN_STEP_M,
+    ZONE_RESET_DROP,
     VEHICLE_STATE_LABELS,
     VEHICLE_STATE_TO_ACTIVITY,
     decode_partition_id_list,
@@ -75,7 +76,8 @@ _SLOW_KEYS = ("set_list", "maintenance", "today_plan", "map_list")
 # The store is written at most once per _TRAIL_SAVE_DELAY seconds and only when
 # the trail actually changed (keeps SD-card writes low on HAOS).
 _TRAIL_STORE_VERSION = 1
-_TRAIL_SAVE_DELAY = 30
+# One file now holds a trail per zone, so it is written less often while cutting.
+_TRAIL_SAVE_DELAY = 60
 
 
 def trail_store(hass: HomeAssistant, entry_id: str) -> Store:
@@ -541,6 +543,19 @@ def _parse_schedule(set_list: Any, zone_names: dict) -> list[dict]:
     return out
 
 
+def _point_in(x: float, y: float, poly: list) -> bool:
+    """Even-odd point-in-polygon test."""
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i][0], poly[i][1]
+        xj, yj = poly[j][0], poly[j][1]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
 def _parse_work_position(raw: Any) -> tuple[int | None, float | None]:
     """(zone id being cut, its progress %) from ``map_work_position``.
 
@@ -812,19 +827,27 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Parsed map geometry, cached across cycles (the map rarely changes).
         self._map_geometry: dict | None = None
         self._map_cache_key: tuple | None = None
-        # Mowed-trail reconstruction: accumulate the robot's position while it
-        # cuts (see SWATH/TRAIL constants). A new session (docked -> mowing
-        # transition) clears the trail. Mutated in the executor thread, so it is
-        # guarded by a lock against an overlapping command-triggered refresh.
-        self._trail: list[list[float]] = []
+        # Mowed-trail reconstruction, one trail per zone (see _update_trail).
+        # Mutated in the executor thread, so it is guarded by a lock against an
+        # overlapping command-triggered refresh.
+        self._trail_zones: dict[int, list[list[float]]] = {}
         self._trail_lock = threading.Lock()
         self._prev_state_code: str | None = None
-        # Leaving the dock no longer decides the trail on its own (#15). These
-        # hold the question open until the mower reports its own progress:
-        # how many polls we still allow for an answer, and where the trail stood
-        # when it left, so a genuinely new job keeps the points sampled since.
+        # The last sample kept, whatever its zone: the next must move from it.
+        self._trail_tail: tuple[float, float] | None = None
+        # Each zone's coverage as last seen: a fall is the cloud starting it over.
+        self._zone_pct: dict[int, int] = {}
+        # Where each zone's trail stood when the mower last left the dock: what
+        # comes after belongs to the job now running and survives its reset.
+        self._trail_marks: dict[int, int] = {}
+        # The zone last reported as being worked, for samples that come without.
+        self._trail_last_zone: int | None = None
+        # A trail saved by an older version, as one list: shared among the zones
+        # once their outlines are known.
+        self._trail_split_pending = False
+        # For mowers with no per-zone coverage: polls still allowed for the
+        # working zone's progress to say whether a mow is a new job (#15).
         self._trail_decide_polls = 0
-        self._trail_mark = 0
         # Persist the trail across restarts (loaded in async_load_trail, saved
         # debounced from _async_update_data only when _trail_dirty is set).
         self._trail_store: Store = trail_store(hass, entry.entry_id)
@@ -873,19 +896,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         """Restore the persisted mowed trail (call before the first refresh).
 
         SN-guarded: ignore data saved for a different mower (e.g. after a backup
-        restore). Also restores ``_prev_state_code`` so the "a new mow resets the
-        trail" rule still holds across a restart (no spurious wipe of the
-        restored trail; a genuinely new docked->mowing transition still resets).
-        Never raises -- persistence must not block setup.
-
-        Known limitation: if HA is down across a full session boundary (mow A
-        ends and mow B starts while HA is off) and the robot is mowing again at
-        startup, the docked->mowing transition is never observed, so B's path is
-        appended to A's (the two mows merge on the map) until the next observed
-        transition resets it. This is the lesser evil of an unavoidable
-        ambiguity -- the alternative (reset on any mowing-at-startup) would wipe
-        a genuinely in-progress mow on every mid-mow restart, which is far more
-        common.
+        restore). Restores each zone's last coverage too, so a zone the cloud
+        started over while HA was off is still seen to have fallen, and
+        ``_prev_state_code`` for mowers that rely on the leaving-the-dock rule.
+        A trail saved as one list by an older version is kept, and shared among
+        the zones once the map is known. Never raises -- persistence must not
+        block setup.
         """
         try:
             data = await self._trail_store.async_load()
@@ -894,21 +910,47 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             return
         if not isinstance(data, dict) or data.get("sn") != self.sn:
             return
-        raw = data.get("trail")
-        if not isinstance(raw, list):
-            return
-        trail: list[list[float]] = []
-        for p in raw:
-            if isinstance(p, (list, tuple)) and len(p) >= 2:
-                try:
-                    trail.append([float(p[0]), float(p[1])])
-                except (TypeError, ValueError):
-                    continue
+
+        def points(raw: Any) -> list[list[float]]:
+            out: list[list[float]] = []
+            for p in raw if isinstance(raw, list) else []:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    try:
+                        out.append([float(p[0]), float(p[1])])
+                    except (TypeError, ValueError):
+                        continue
+            return out[-TRAIL_MAX_POINTS:]
+
+        zones: dict[int, list[list[float]]] = {}
+        split = False
+        if isinstance(data.get("zones"), dict):
+            for key, raw in data["zones"].items():
+                zid = _as_int(key)
+                pts = points(raw)
+                if zid is not None and pts:
+                    zones[zid] = pts
+        elif isinstance(data.get("trail"), list):
+            # Saved before trails were kept per zone: one list for the lawn.
+            pts = points(data["trail"])
+            if pts:
+                zones[0] = pts
+                split = True
+        zone_pct: dict[int, int] = {}
+        if isinstance(data.get("zone_pct"), dict):
+            for key, pct in data["zone_pct"].items():
+                zid, val = _as_int(key), _as_int(pct)
+                if zid is not None and val is not None:
+                    zone_pct[zid] = val
         with self._trail_lock:
-            self._trail = trail[-TRAIL_MAX_POINTS:]
+            self._trail_zones = zones
+            self._trail_split_pending = split
+            self._zone_pct = zone_pct
             prev = data.get("prev_state_code")
             self._prev_state_code = prev if isinstance(prev, str) else None
-        _LOGGER.debug("trail: restored %d points", len(trail))
+        _LOGGER.debug(
+            "trail: restored %d points in %d zones",
+            sum(len(p) for p in zones.values()), len(zones),
+        )
 
     def _trail_store_data(self) -> dict:
         """Snapshot of the trail for the persistent store (read at write time)."""
@@ -916,7 +958,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             return {
                 "sn": self.sn,
                 "prev_state_code": self._prev_state_code,
-                "trail": list(self._trail),
+                "zones": {str(z): list(p) for z, p in self._trail_zones.items() if p},
+                "zone_pct": {str(z): v for z, v in self._zone_pct.items()},
             }
 
     # ------------------------------------------------------------------ poll
@@ -1256,7 +1299,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # Coverage (per-zone %) + reconstructed mowed trail (accumulated position).
         position = self._parse_position(location)
         coverage = _parse_coverage(raw.get("path_info_time"), zone_names)
-        trail = self._update_trail(position, state_code, active_pct)
+        trail_zones = self._update_trail(
+            position, state_code, active_id, active_pct, coverage, map_geom.get("zones")
+        )
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
         if raw_error:
@@ -1399,9 +1444,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             ),
             "position": position,
             "path": self._parse_path(location),
-            # per-zone coverage (%) + reconstructed mowed trail ([[x,y],...])
+            # per-zone coverage (%) + reconstructed mowed trail: per zone
+            # ({zone id: [[x,y],...]}, 0 = no zone reported) and all of it as one
+            # list, for anything that wants the whole lawn.
             "coverage": coverage,
-            "trail": trail,
+            "trail_zones": trail_zones,
+            "trail": [p for pts in trail_zones.values() for p in pts],
             # decoded map geometry (None until the map is fetched/decoded)
             "map": (
                 {
@@ -1505,68 +1553,149 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self,
         position: dict | None,
         state_code: str,
+        active_id: int | None = None,
         zone_progress: float | None = None,
-    ) -> list[list[float]]:
-        """Accumulate the mowed path from position samples (see SWATH constants).
+        coverage: dict | None = None,
+        zone_shapes: list | None = None,
+    ) -> dict[int, list[list[float]]]:
+        """Accumulate the mowed path from position samples, one trail per zone.
 
-        Leaving the dock to mow is NOT by itself a new session. A rain hold sends
-        the mower home mid-zone, and pressing Mow afterwards continues where it
-        stopped -- clearing the trail there threw away everything already cut and
-        redrew the map from the resume point (#15), while the phone app showed
-        the whole zone because it renders the mower's coverage instead of a
-        reconstruction.
+        One trail for the whole lawn, capped at TRAIL_MAX_POINTS, lost the start
+        of a job that ran over several days: by the time the mower reached its
+        last zones, the first had been cut off the far end (#15). Each zone now
+        keeps its own trail under its own cap. A sample goes to the zone the
+        mower says it is working, not the one it happens to be over, so a trip
+        across one zone to reach another is not kept as a pass on the first; with
+        none reported it goes to the last zone that was, and failing that to 0.
 
-        What separates the two is the mower's own progress in the zone it is
-        working: 0 on a job starting over, non-zero on one being picked up. That
-        number can lag the state change by a poll or two, so the question is held
-        open for TRAIL_DECIDE_POLLS rather than answered immediately with
-        whatever happens to be there -- deciding early on a missing value is
-        exactly how the old rule got it wrong. If no answer arrives in that
-        window, it falls back to "new job", the behaviour of every earlier
-        version. On a genuinely new job the points sampled while waiting are
-        kept, so nothing is lost by having asked.
+        A zone's trail ends when the cloud starts that zone over -- its coverage
+        falls to 0, or by ZONE_RESET_DROP points or more. That is the mower's own
+        answer to "is this a new job", zone by zone, where the old rule guessed
+        it from leaving the dock and took a rain hold's resume for a fresh start.
+        What was drawn since the mower last left the dock is kept, since it
+        belongs to the job that has just begun. Zone 0 goes with any reset.
 
-        Pause/resume does NOT reset (paused is not a docked state). While cutting,
-        the current position is appended if it moved at least TRAIL_MIN_STEP_M
-        (drops jitter). The trail persists after docking so the finished pattern
-        stays visible until the next mow. Guarded by a lock because it runs in an
-        executor thread and a command-triggered refresh may overlap the poll.
+        Mowers that report no per-zone coverage keep the old rule: a mow leaving
+        the dock with the working zone at 0 % is a new job, the question held
+        open for TRAIL_DECIDE_POLLS because the progress can lag by a poll or two,
+        and "new job" if it never comes.
+
+        While cutting, a sample is kept if it moved at least TRAIL_MIN_STEP_M
+        (drops jitter), rounded to the centimetre. Guarded by a lock because it
+        runs in an executor thread and a command-triggered refresh may overlap
+        the poll.
         """
         with self._trail_lock:
-            if state_code == STATE_MOWING and is_docked(self._prev_state_code or ""):
+            zones = self._trail_zones
+            was_docked = is_docked(self._prev_state_code or "")
+            if is_docked(state_code):
+                # In the dock there is no job under way to keep points for: a
+                # zone started over now loses its whole trail.
+                self._trail_marks = {}
+            elif was_docked:
+                self._trail_marks = {z: len(p) for z, p in zones.items()}
+                self._trail_last_zone = None
+            if state_code == STATE_MOWING and was_docked:
                 self._trail_decide_polls = TRAIL_DECIDE_POLLS
-                self._trail_mark = len(self._trail)
             self._prev_state_code = state_code
 
-            if self._trail_decide_polls:
+            if self._trail_split_pending and zone_shapes:
+                self._split_old_trail(zone_shapes)
+
+            pcts = {
+                z["id"]: z["pct"]
+                for z in (coverage or {}).get("zones") or []
+                if z.get("id") is not None and z.get("pct") is not None
+            }
+            if pcts:
+                self._trail_decide_polls = 0
+                restarted = False
+                for zid, pct in pcts.items():
+                    before = self._zone_pct.get(zid)
+                    if before is not None and pct < before and (
+                        pct == 0 or before - pct >= ZONE_RESET_DROP
+                    ):
+                        self._restart_zone(zid)
+                        restarted = True
+                if restarted:
+                    self._restart_zone(0)
+                if any(self._zone_pct.get(z) != v for z, v in pcts.items()):
+                    self._zone_pct.update(pcts)
+                    self._trail_dirty = True
+            elif self._trail_decide_polls:
                 if state_code != STATE_MOWING:
-                    # Back to the dock before it told us anything: no new session
-                    # to judge, so leave the trail as it is.
+                    # Back to the dock before it told us anything: no new job to
+                    # judge, so leave the trail as it is.
                     self._trail_decide_polls = 0
                 else:
                     self._trail_decide_polls -= 1
-                    starting_over = not zone_progress
                     if zone_progress is not None or not self._trail_decide_polls:
-                        if starting_over and self._trail_mark:
-                            # Keep only what this session has drawn so far.
-                            self._trail = self._trail[self._trail_mark :]
-                            self._trail_dirty = True
+                        if not zone_progress:
+                            for zid in list(zones):
+                                self._restart_zone(zid)
                         self._trail_decide_polls = 0
 
+            if active_id:
+                self._trail_last_zone = active_id
             if state_code == STATE_MOWING and position:
                 x, y = position.get("x"), position.get("y")
                 if x is not None and y is not None:
-                    if not self._trail:
-                        self._trail.append([x, y])
+                    x, y = round(x, 2), round(y, 2)
+                    tail = self._trail_tail
+                    if tail is None or (x - tail[0]) ** 2 + (y - tail[1]) ** 2 >= TRAIL_MIN_STEP_M ** 2:
+                        zid = active_id or self._trail_last_zone or 0
+                        pts = zones.setdefault(zid, [])
+                        pts.append([x, y])
+                        self._trail_tail = (x, y)
+                        over = len(pts) - TRAIL_MAX_POINTS
+                        if over > 0:
+                            del pts[:over]
+                            if zid in self._trail_marks:
+                                self._trail_marks[zid] = max(0, self._trail_marks[zid] - over)
                         self._trail_dirty = True
-                    else:
-                        lx, ly = self._trail[-1]
-                        if (x - lx) ** 2 + (y - ly) ** 2 >= TRAIL_MIN_STEP_M ** 2:
-                            self._trail.append([x, y])
-                            if len(self._trail) > TRAIL_MAX_POINTS:
-                                del self._trail[: len(self._trail) - TRAIL_MAX_POINTS]
-                            self._trail_dirty = True
-            return list(self._trail)
+            return {z: list(p) for z, p in zones.items() if p}
+
+    def _restart_zone(self, zid: int) -> None:
+        """The cloud started this zone over: keep only this job's part of its trail."""
+        pts = self._trail_zones.get(zid)
+        if not pts:
+            return
+        keep = pts[self._trail_marks.get(zid, len(pts)) :]
+        if len(keep) != len(pts):
+            self._trail_zones[zid] = keep
+            self._trail_dirty = True
+        self._trail_marks[zid] = 0
+
+    def _split_old_trail(self, zone_shapes: list) -> None:
+        """Share a trail saved as one list among the zones it lies in.
+
+        Points in no zone stay in zone 0 until the next reset -- they would be
+        clipped from the map anyway.
+        """
+        self._trail_split_pending = False
+        old = self._trail_zones.get(0) or []
+        shapes = []
+        for z in zone_shapes:
+            poly = z.get("polygon") or []
+            zid = _as_int(z.get("id"))
+            if zid and len(poly) >= 3:
+                xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+                shapes.append((zid, poly, min(xs), max(xs), min(ys), max(ys)))
+        if not old or not shapes:
+            return
+        moved: dict[int, list[list[float]]] = {}
+        rest: list[list[float]] = []
+        for x, y in old:
+            for zid, poly, x0, x1, y0, y1 in shapes:
+                if x0 <= x <= x1 and y0 <= y <= y1 and _point_in(x, y, poly):
+                    moved.setdefault(zid, []).append([x, y])
+                    break
+            else:
+                rest.append([x, y])
+        for zid, pts in moved.items():
+            self._trail_zones[zid] = (pts + self._trail_zones.get(zid, []))[-TRAIL_MAX_POINTS:]
+        self._trail_zones[0] = rest
+        self._trail_dirty = True
 
     @staticmethod
     def _parse_position(location: Any) -> dict | None:

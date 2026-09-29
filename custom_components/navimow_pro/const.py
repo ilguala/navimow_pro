@@ -155,7 +155,12 @@ ERROR_CLEAR_POLLS: Final = 3
 # app polls get-location over HTTP ~every 1.5-2 s; the cloud exposes no coverage
 # grid and get-path-info-data-compress is not reachable standalone.)
 SWATH_WIDTH_M: Final = 0.25  # approx cutting width (m) used as the trail stroke width
-TRAIL_MAX_POINTS: Final = 10000  # cap accumulated points (a long mow) to bound memory
+# Cap on the points kept PER ZONE (oldest dropped first). One cap for the whole
+# lawn cut the start of a multi-day job off the map before it ended (#15).
+TRAIL_MAX_POINTS: Final = 10000
+# A zone's coverage falling to 0, or by at least this many points, is the cloud
+# starting that zone over -- and the end of its trail. Smaller dips are noise.
+ZONE_RESET_DROP: Final = 10
 TRAIL_MIN_STEP_M: Final = 0.12  # drop position jitter: ignore steps smaller than this
 TRAIL_BREAK_M: Final = 2.0  # split the drawn trail where consecutive samples jump farther
 
