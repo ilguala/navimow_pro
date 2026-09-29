@@ -188,6 +188,9 @@ you want your own names.
 Everything else about zones is handled for you, including the order they are
 mowed in.
 
+The same dialog sets the **mower's size on the map**, in percent of the default
+(10–300 %) — handy when the lawn is large and the icon gets lost in it.
+
 ---
 
 ## How it works (high level)

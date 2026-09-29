@@ -23,6 +23,11 @@ CONF_MODEL: Final = "model"
 
 # Options-flow keys
 OPT_ZONES: Final = "zones"  # user-supplied "id:name,id:name" mapping (fallback zone list)
+# Size of the mower icon on the map, in percent of the built-in size.
+OPT_MOWER_SCALE: Final = "mower_scale"
+DEFAULT_MOWER_SCALE: Final = 100
+MOWER_SCALE_MIN: Final = 10
+MOWER_SCALE_MAX: Final = 300
 
 DEFAULT_LANGUAGE: Final = "en"
 

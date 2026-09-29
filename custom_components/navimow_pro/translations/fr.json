@@ -53,9 +53,10 @@
     "step": {
       "init": {
         "title": "Options Navimow",
-        "description": "Liste des zones pour le sélecteur, sous forme de paires id:nom séparées par des virgules (par exemple : 1:Zone 1,5:Zone 2). L’identifiant de région correspond à l’identifiant de la partition de la carte. Laissez vide pour utiliser la découverte automatique.",
+        "description": "Liste des zones pour le sélecteur, sous forme de paires id:nom séparées par des virgules (par exemple : 1:Zone 1,5:Zone 2). L’identifiant de région correspond à l’identifiant de la partition de la carte. Laissez vide pour utiliser la découverte automatique. Taille de la tondeuse : la taille de l’icône de la tondeuse sur la carte, en pourcentage de la taille par défaut.",
         "data": {
-          "zones": "Zones (id:nom,...)"
+          "zones": "Zones (id:nom,...)",
+          "mower_scale": "Taille de la tondeuse sur la carte"
         }
       }
     }

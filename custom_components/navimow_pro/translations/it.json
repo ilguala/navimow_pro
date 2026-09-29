@@ -53,9 +53,10 @@
     "step": {
       "init": {
         "title": "Opzioni Navimow",
-        "description": "Elenco delle zone per il selettore, come lista separata da virgole di coppie id:nome (esempio: 1:Zona 1,5:Zona 2). L'id regione e' l'id della partizione della mappa. Lascia vuoto per affidarti all'auto-rilevamento.",
+        "description": "Elenco delle zone per il selettore, come lista separata da virgole di coppie id:nome (esempio: 1:Zona 1,5:Zona 2). L'id regione e' l'id della partizione della mappa. Lascia vuoto per affidarti all'auto-rilevamento. Dimensione del rasaerba: la dimensione dell'icona del rasaerba sulla mappa, in percentuale della dimensione predefinita.",
         "data": {
-          "zones": "Zone (id:nome,...)"
+          "zones": "Zone (id:nome,...)",
+          "mower_scale": "Dimensione del rasaerba sulla mappa"
         }
       }
     }
