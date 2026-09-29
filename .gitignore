@@ -6,6 +6,8 @@ __pycache__/
 .eggs/
 build/
 dist/
+.venv/
+.pytest_cache/
 
 # Editors / OS
 .vscode/

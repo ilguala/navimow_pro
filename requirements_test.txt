@@ -1,0 +1,6 @@
+# Run the tests without Home Assistant: pip install -r requirements_test.txt && pytest
+pytest
+# Imported by api/crypto.py, which coordinator.py pulls in.
+cryptography
+# Decodes the map blob on Pythons before 3.14 (3.14 has compression.zstd).
+zstandard
