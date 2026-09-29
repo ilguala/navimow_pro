@@ -195,6 +195,9 @@ class NavimowMapCamera(NavimowEntity, Camera):
     """An SVG map of the lawn: zones, obstacles, no-mow areas, dock, mower."""
 
     _attr_translation_key = "map"
+    # Built-in size until __init__ reads the option, so a camera built without
+    # one -- as the tests do -- still draws the mower.
+    _mower_scale = 1.0
 
     def __init__(self, coordinator: NavimowCoordinator) -> None:
         NavimowEntity.__init__(self, coordinator, "map")
