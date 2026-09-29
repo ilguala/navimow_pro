@@ -33,6 +33,7 @@ All entities live under a single Home Assistant device (the mower).
 | `device_tracker` | Mower position | The mower on Home Assistant's map, for zone and proximity automations (see below) |
 | `select` | Mow zone | Stores which zone the `lawn_mower` Start button will mow (or "All zones") — it does **not** start mowing itself |
 | `switch` | Night mowing, rain handling, sound, power saving, and the mower's other settings | Settings whose behaviour is unconfirmed are opt-in / disabled by default |
+| `event` | Mower events | Fires `mowing_started`, `returned_to_dock`, `mowing_finished` and `error`, so automations need not read state transitions (see below) |
 | `camera` | Map | App-style SVG map: zones (with mowed %), per-segment boundaries (dashed = virtual boundary, solid = ride-on edge), channels between zones, off-limit areas and VisionFence-off areas, dock, the live mower, and the reconstructed mowed trail (persisted across restarts) |
 
 Motion commands (start / pause / dock) only ever fire on an explicit user
@@ -66,6 +67,49 @@ it cannot discard the progress made so far.
 > though you may then see each card listed twice in the picker.
 
 ---
+
+## Mower events
+
+The **Mower events** entity fires when something happens, rather than holding a
+state, which is what a notification automation wants:
+
+| Event type | Fires when |
+|---|---|
+| `mowing_started` | the mower leaves the dock and starts mowing |
+| `returned_to_dock` | it is back in the dock after a trip out -- to charge, for rain, or done |
+| `mowing_finished` | it is back in the dock **and** the job reports 100 % |
+| `error` | a fault is raised (with `error_text` and `error_codes`) |
+
+Every event carries `state`, `state_code`, `mowing_progress`, `current_zone` and
+`battery`. The status code alone cannot tell "finished" from "back to charge":
+"Docked (finished)" is reported after every return, whatever the progress. Only
+the 100 % can, so a job that is interrupted and resumed finishes once, at the
+end. Events are not replayed for what happened while Home Assistant was down.
+
+```yaml
+automation:
+  - alias: Mower done or stuck
+    triggers:
+      - trigger: state
+        entity_id: event.navimow_mower_events
+    conditions:
+      # Coming back from "unavailable" after a restart restores the last event;
+      # that is not a new one.
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none
+             and trigger.from_state.state not in ['unavailable', 'unknown']
+             and trigger.to_state.attributes.event_type in ['mowing_finished', 'error'] }}
+    actions:
+      - action: notify.notify
+        data:
+          message: >-
+            {% if trigger.to_state.attributes.event_type == 'error' %}
+              Mower needs help: {{ trigger.to_state.attributes.error_text }}
+            {% else %}
+              Mowing finished.
+            {% endif %}
+```
 
 ## The mower on the Home Assistant map
 
