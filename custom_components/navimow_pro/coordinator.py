@@ -121,6 +121,11 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _valid_map_id(value: Any) -> bool:
+    """A usable map id: present, and not the 0 some mowers report in its place."""
+    return value is not None and str(value).strip() not in ("", "0")
+
+
 def _as_bool(value: Any) -> bool | None:
     """Interpret the mower's many truthy encodings ('01', 1, '1', True)."""
     if value is None:
@@ -1145,16 +1150,23 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         map_id = location.get("map_id")
         map_base_id = location.get("map_base_id")
         edit_time = location.get("map_edit_time")
-        # Fall back to map-list if get-location didn't carry the ids.
-        if map_id is None:
+        # Fall back to map-list when get-location has no usable ids. A
+        # first-generation H mower reports them as 0, and 0 was taken for a real
+        # id: position and trail worked, the map never loaded (#22; found on an
+        # H1500 by vahesoo).
+        if not (_valid_map_id(map_id) and _valid_map_id(map_base_id)):
             map_list = raw.get("map_list")
-            first = map_list[0] if isinstance(map_list, list) and map_list else {}
-            if isinstance(first, dict):
-                map_id = first.get("map_id")
-                map_base_id = first.get("map_base_id")
-                edit_time = first.get("edittime")
-        if map_id is None or map_base_id is None:
-            return
+            for item in map_list if isinstance(map_list, list) else []:
+                if (
+                    isinstance(item, dict)
+                    and _valid_map_id(item.get("map_id"))
+                    and _valid_map_id(item.get("map_base_id"))
+                ):
+                    map_id, map_base_id = item["map_id"], item["map_base_id"]
+                    edit_time = item.get("edittime")
+                    break
+            else:
+                return
 
         key = (str(map_id), str(map_base_id), str(edit_time))
         if self._map_geometry is not None and self._map_cache_key == key:
