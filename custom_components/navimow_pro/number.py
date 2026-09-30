@@ -198,9 +198,17 @@ class NavimowNumber(NavimowEntity, NumberEntity):
         self._pending: int | None = None
         self._failed: int | None = None
         self._unsub_confirm = None
+        # The value just asked for, shown until the mower reports it or
+        # CUT_HEIGHT_CONFIRM_S pass. Right after a write the cloud still reports
+        # the old value, so the slider jumped back to it and only later moved to
+        # the new one (#15).
+        self._shown: int | None = None
+        self._unsub_shown = None
 
     @property
     def native_value(self) -> float | None:
+        if self._shown is not None:
+            return float(self._shown) / self.entity_description.scale
         val = self.entity_description.value_fn(self.data.get("settings") or {})
         return None if val is None else float(val) / self.entity_description.scale
 
@@ -212,25 +220,53 @@ class NavimowNumber(NavimowEntity, NumberEntity):
         if self._allowed:
             wire = min(self._allowed, key=lambda o: abs(o - wire))
         key = desc.write_key
-        # 1) device command first -- robot value is a hex string ('14'=20,
-        #    '0C'=12), so the robot applies it (the cloud copy alone is reverted).
-        #    Refused while mowing, aborting before the cloud write, like the app.
-        await self.coordinator.async_send(
-            self.coordinator.client.send_setting_device,
-            self._sn,
-            {key: f"{wire:02X}" if desc.robot_hex else str(wire)},
-        )
-        # 2) cloud persist (iot_set): hex string for some keys, bare decimal for
-        #    the percentages -- per the per-key encoding.
-        cloud_val = f"{wire:02X}" if desc.cloud_hex else wire
-        await self.coordinator.async_send(
-            self.coordinator.client.save_setting_iot,
-            self._sn,
-            self.coordinator.vehicle_type,
-            {key: cloud_val},
-        )
+        self._show(wire)
+        try:
+            # 1) device command first -- robot value is a hex string ('14'=20,
+            #    '0C'=12), so the robot applies it (the cloud copy alone is
+            #    reverted). Refused while mowing, aborting before the cloud
+            #    write, like the app.
+            await self.coordinator.async_send(
+                self.coordinator.client.send_setting_device,
+                self._sn,
+                {key: f"{wire:02X}" if desc.robot_hex else str(wire)},
+            )
+            # 2) cloud persist (iot_set): hex string for some keys, bare decimal
+            #    for the percentages -- per the per-key encoding.
+            cloud_val = f"{wire:02X}" if desc.cloud_hex else wire
+            await self.coordinator.async_send(
+                self.coordinator.client.save_setting_iot,
+                self._sn,
+                self.coordinator.vehicle_type,
+                {key: cloud_val},
+            )
+        except Exception:
+            # Refused: the slider goes back to what the mower has.
+            self._drop_shown()
+            self.async_write_ha_state()
+            raise
         if desc.key == "cut_height":
             self._expect(wire)
+
+    def _show(self, target: int) -> None:
+        self._drop_shown()
+        self._shown = target
+        self._unsub_shown = async_call_later(
+            self.hass, CUT_HEIGHT_CONFIRM_S, self._async_shown_expired
+        )
+
+    def _drop_shown(self) -> None:
+        self._shown = None
+        if self._unsub_shown is not None:
+            self._unsub_shown()
+            self._unsub_shown = None
+
+    @callback
+    def _async_shown_expired(self, _now: datetime) -> None:
+        """Never reported: show what the mower has again."""
+        self._unsub_shown = None
+        self._shown = None
+        self.async_write_ha_state()
 
     # ------------------------------------------------- cutting-height read-back
     def _expect(self, target: int) -> None:
@@ -292,6 +328,8 @@ class NavimowNumber(NavimowEntity, NumberEntity):
     def _handle_coordinator_update(self) -> None:
         current = self.entity_description.value_fn(self.data.get("settings") or {})
         if current is not None:
+            if self._shown is not None and int(current) == self._shown:
+                self._drop_shown()
             if self._pending is not None and int(current) == self._pending:
                 self._pending = None
                 self._cancel_confirm()
@@ -303,4 +341,5 @@ class NavimowNumber(NavimowEntity, NumberEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         self._cancel_confirm()
+        self._drop_shown()
         await super().async_will_remove_from_hass()
