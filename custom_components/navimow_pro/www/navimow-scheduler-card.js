@@ -59,6 +59,24 @@ const STRINGS = {
     slots: "fasce",
     dash: "&#8594;",
   },
+  de: {
+    title: "Mähplan",
+    add: "Zeitraum hinzufügen",
+    save: "Speichern",
+    discard: "Verwerfen",
+    saved: "Gespeichert",
+    saving: "Wird gespeichert...",
+    error: "Speichern fehlgeschlagen",
+    allZones: "Alle Zonen",
+    off: "Aus",
+    remove: "Zeitraum entfernen",
+    noSensor: "Zeitplan-Sensor nicht gefunden.",
+    invalid: "Das Ende muss nach dem Beginn liegen.",
+    incomplete: "Beide Uhrzeiten ausfüllen.",
+    slot: "Zeitraum",
+    slots: "Zeiträume",
+    dash: "&#8594;",
+  },
 };
 
 // Display order Monday-first; `num` is the Navimow weekday number (1=Sun..7=Sat),
@@ -81,6 +99,10 @@ const DAY_LABELS = {
   it: {
     monday: "Luned&igrave;", tuesday: "Marted&igrave;", wednesday: "Mercoled&igrave;",
     thursday: "Gioved&igrave;", friday: "Venerd&igrave;", saturday: "Sabato", sunday: "Domenica",
+  },
+  de: {
+    monday: "Montag", tuesday: "Dienstag", wednesday: "Mittwoch",
+    thursday: "Donnerstag", friday: "Freitag", saturday: "Samstag", sunday: "Sonntag",
   },
 };
 
@@ -176,7 +198,9 @@ class NavimowSchedulerCard extends HTMLElement {
   // ---- helpers -------------------------------------------------------------
   _lang() {
     const l = (this._hass?.language || "en").toLowerCase();
-    return l.startsWith("it") ? "it" : "en";
+    if (l.startsWith("it")) return "it";
+    if (l.startsWith("de")) return "de";
+    return "en";
   }
   _t() {
     return STRINGS[this._lang()];
