@@ -57,6 +57,11 @@ _BORDER_SOLID_ATTR = 2
 
 _TRAIL_COLOR = "#43a047"    # mowed layer (opaque, flattened via group opacity)
 _TRAIL_OPACITY = 0.40       # applied to the WHOLE trail group -> no compounding
+# The trail is drawn this much wider than the blade. Passes overlap only a
+# little and the position is sampled every few seconds, so at the blade's
+# width a zone being mowed showed thin unmowed stripes between passes that the
+# app does not (#15). The edges are clipped to the zones anyway.
+_TRAIL_WIDEN = 1.3
 _MOWER_ORANGE = "#ff6d00"
 # The map's "obstacles" are what the app calls off-limit areas -- the no-go zones
 # an owner draws -- and the app outlines them in orange. Its "vision_off_areas"
@@ -393,7 +398,7 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 trail_parts.append(f'<polygon points="{pts_str}" fill="{_TRAIL_COLOR}"/>')
         if any(len(pts) >= 2 for zid, pts in runs if zid not in finished):
             swath = self.data.get("swath_width_m") or SWATH_WIDTH_M
-            stroke_w = min(max(swath * scale, 6.0), 32.0)
+            stroke_w = min(max(swath * _TRAIL_WIDEN * scale, 6.0), 32.0)
             break_sq = TRAIL_BREAK_M * TRAIL_BREAK_M
             # Samples closer than 1.5 px on screen add nothing but size: with a
             # trail per zone the map can hold several times the points it did.
