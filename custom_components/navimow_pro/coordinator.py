@@ -126,6 +126,24 @@ def _valid_map_id(value: Any) -> bool:
     return value is not None and str(value).strip() not in ("", "0")
 
 
+def _rain_delay_wire(value: Any) -> int | None:
+    """delayedPileSet as the mower reports it: a two-digit hex string.
+
+    Wire units are quarter hours, so 6 h is 24, reported "18". Read as decimal
+    first, "18" gave 4.5 h, and 8, 9 and 10 h passed for 5, 6 and 7 -- valid
+    looking, and wrong (#24). It is written in hex too (number.py). An actual
+    number, should a firmware send one, is taken as it is.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip(), 16)
+    except ValueError:
+        return None
+
+
 def _as_bool(value: Any) -> bool | None:
     """Interpret the mower's many truthy encodings ('01', 1, '1', True)."""
     if value is None:
@@ -1352,18 +1370,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         weather_switch = _as_bool(_find(set_list, "weatherSwitch", "weather_switch"))
         weather_sensitivity = _as_int(_find(set_list, "weatherSensitivity", "weather_sensitivity"))
         rain_behavior = _as_bool(_find(set_list, "delayedPileSwitch", "delayed_pile_switch"))
-        # delayedPileSet: try decimal (set-list style) then hex; store the raw wire
-        # value (number.py divides by the per-entity scale to show hours).
-        _rd = _find(set_list, "delayedPileSet", "delayed_pile_set")
-        rain_delay_wire: int | None = None
-        if _rd is not None:
-            try:
-                rain_delay_wire = int(str(_rd).strip(), 10)
-            except (TypeError, ValueError):
-                try:
-                    rain_delay_wire = int(str(_rd).strip(), 16)
-                except (TypeError, ValueError):
-                    rain_delay_wire = None
+        # delayedPileSet: the raw wire value, read as hex (number.py divides by
+        # the per-entity scale to show hours).
+        rain_delay_wire = _rain_delay_wire(
+            _find(set_list, "delayedPileSet", "delayed_pile_set")
+        )
 
         settings = {
             "night_mow": night_mow,
