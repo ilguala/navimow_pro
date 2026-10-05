@@ -417,6 +417,13 @@ FAMILY_LACKS: Final = (
     # X3 (X315 / X330 / X350 / X390): reports chargingLimit, but the Navimow app
     # offers no charge limit on it. Two owners, independently.
     ("X3", frozenset({"charging_limit"})),
+    # First-generation H (H800, H1500): a zone mow with the custom-order bit set
+    # (partitionSetup 0x02) is never answered and the mower stays put, while the
+    # same zones with auto routing (0x01) are mowed. H800 found by tampiss (#16),
+    # H1500 confirmed by gjuncu (#25). The zones are still the ones picked; only
+    # the order is left to the mower. Other H1 models join on confirmation.
+    ("H800", frozenset({"ordered_mow"})),
+    ("H1500", frozenset({"ordered_mow"})),
 )
 
 

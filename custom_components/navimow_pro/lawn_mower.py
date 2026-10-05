@@ -22,6 +22,7 @@ from .const import (
     STATE_PAUSED,
     STATE_PAUSED_RETURNING,
     encode_partition_ids,
+    model_lacks,
     mow_setup,
 )
 from .coordinator import NavimowCoordinator
@@ -96,12 +97,14 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         region_ids = sel or available_ids
         partition_ids = encode_partition_ids(region_ids)
         # A picked zone is a preference to honour; "all zones" is not, so let the
-        # robot choose its own route there.
+        # robot choose its own route there -- as it must on a model that ignores
+        # the custom order altogether (see FAMILY_LACKS).
+        ordered = bool(sel) and not model_lacks(self.data.get("model"), "ordered_mow")
         await self.coordinator.async_send(
             client.mow_zones,
             sn,
             partition_ids,
-            mow_setup(reset=True, ordered=bool(sel)),
+            mow_setup(reset=True, ordered=ordered),
         )
 
     async def async_pause(self) -> None:

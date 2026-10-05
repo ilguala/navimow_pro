@@ -286,6 +286,9 @@ unavailable or reads `unknown` rather than the integration crashing:
   so a field being present is not proof the feature exists. A short list of
   field-confirmed exceptions hides what a family does not have -- currently no
   remote cutting height on the i1, and no charge limit on the X3.
+- **Zone order on the H800 and H1500.** These mowers ignore a zone mow that
+  asks for a particular order, so they are sent the zones you pick without one:
+  they mow those zones, in an order of their own choosing.
 - **Zone ids in services.** `mow` and `set_schedule` refuse zone ids the decoded
   map does not contain — but only once the map has actually decoded. On a
   firmware whose map never arrives, nothing is checked, because refusing a

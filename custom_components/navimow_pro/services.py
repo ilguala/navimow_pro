@@ -26,6 +26,7 @@ from homeassistant.helpers import device_registry as dr
 from .const import (
     DOMAIN,
     encode_partition_ids,
+    model_lacks,
     mow_setup,
 )
 
@@ -220,7 +221,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         zones = [int(z) for z in call.data.get("zones") or []]
         # An explicit list means "mow these, in this order"; omitting it means
         # "all zones, no preference" -> let the robot route itself (see mow_setup).
-        ordered = bool(zones)
+        # A model that ignores the custom order gets the zones without it.
+        ordered = bool(zones) and not model_lacks(
+            (coordinator.data or {}).get("model"), "ordered_mow"
+        )
         _check_zones(coordinator, zones)
         if not zones:
             # All available zones (from the current snapshot).
