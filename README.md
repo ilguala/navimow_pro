@@ -25,7 +25,7 @@ All entities live under a single Home Assistant device (the mower).
 
 | Platform | Entity | Notes |
 |---|---|---|
-| `lawn_mower` | Mower | Start / Pause / Dock (+ Resume via Start when paused) |
+| `lawn_mower` | Mower | Start / Pause / Dock. Start resumes a paused mow, and carries on with an unfinished job when the mower is docked and no zones are picked |
 | `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
 | `binary_sensor` | Problem, Online, Docked | A fault is held briefly after the cloud stops reporting it, so the sensor does not flicker |
 | `number` | Cutting height, battery thresholds | Created only on mowers that report the setting; bounded by the values the machine accepts |

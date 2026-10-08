@@ -238,3 +238,19 @@ def test_labels_stay_put_when_the_mower_drives_past():
     last_pill = max(m.start() for m in re.finditer(r'<rect [^>]*fill="#eceff1"', b))
     mower = re.search(r'<g transform="translate\([\d.]+,[\d.]+\) rotate', b).start()
     assert mower > last_pill  # drawn over the labels
+
+
+def test_a_zone_at_zero_drops_a_trail_it_was_never_seen_to_lose(monkeypatch):
+    # #22: a trail carried over from an older version sat on a zone at 0 %.
+    m = Mower(monkeypatch, {2: 0})
+    m.co._trail_zones = {2: [[1.0, 1.0], [2.0, 2.0]]}
+    m.poll(DOCK, moving=False)
+    assert m.n(2) == 0
+
+
+def test_a_zone_at_zero_being_mowed_keeps_todays_points(monkeypatch):
+    m = Mower(monkeypatch, {2: 0})
+    m.co._trail_zones = {2: [[1.0, 1.0], [2.0, 2.0]]}
+    m.poll(DOCK, moving=False)
+    m.mow(5, zone=2)  # the cloud still says 0 % while it cuts
+    assert m.n(2) == 5

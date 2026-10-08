@@ -1598,6 +1598,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         What was drawn since the mower last left the dock is kept, since it
         belongs to the job that has just begun. Zone 0 goes with any reset.
 
+        A zone at 0 % keeps only that part too, even if it was never seen higher:
+        a trail carried over from an older version, or from a job that ended
+        while HA was off, otherwise stayed drawn on a zone the app shows uncut
+        (#22).
+
         Mowers that report no per-zone coverage keep the old rule: a mow leaving
         the dock with the working zone at 0 % is a new job, the question held
         open for TRAIL_DECIDE_POLLS because the progress can lag by a poll or two,
@@ -1640,6 +1645,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                     ):
                         self._restart_zone(zid)
                         restarted = True
+                    elif pct == 0:
+                        self._restart_zone(zid)
                 if restarted:
                     self._restart_zone(0)
                 if any(self._zone_pct.get(z) != v for z, v in pcts.items()):
@@ -1681,12 +1688,13 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
     def _restart_zone(self, zid: int) -> None:
         """The cloud started this zone over: keep only this job's part of its trail."""
         pts = self._trail_zones.get(zid)
-        if not pts:
-            return
-        keep = pts[self._trail_marks.get(zid, len(pts)) :]
-        if len(keep) != len(pts):
-            self._trail_zones[zid] = keep
-            self._trail_dirty = True
+        if pts:
+            keep = pts[self._trail_marks.get(zid, len(pts)) :]
+            if len(keep) != len(pts):
+                self._trail_zones[zid] = keep
+                self._trail_dirty = True
+        # From here on, whatever the zone gathers belongs to the job under way --
+        # also when it had nothing yet, or its next sample would not count.
         self._trail_marks[zid] = 0
 
     def _split_old_trail(self, zone_shapes: list) -> None:

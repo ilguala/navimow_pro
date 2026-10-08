@@ -63,11 +63,17 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         return _ACTIVITY_MAP.get(self.data.get("activity"), LawnMowerActivity.DOCKED)
 
     async def async_start_mowing(self) -> None:
-        """Resume a paused job, otherwise mow the zone chosen in the zone select.
+        """Carry on with an unfinished job, otherwise mow the zones chosen.
 
         The zone select stores the choice (``coordinator.selected_zone_ids``,
-        empty = all zones); this button starts it. Always "restart" mode -- the
-        popup "Mow now" card is where a continue-vs-restart choice lives.
+        empty = all zones); this button starts it, in "restart" mode -- the popup
+        "Mow now" card is where a continue-vs-restart choice lives.
+
+        Two cases continue instead. A paused mower resumes. And a mower back in
+        its dock with the job half done -- sent home by rain, or by the end of
+        its window -- carries on when no zones are picked: that is what the app's
+        Mow now does, and Start used to throw the job away and begin again from
+        0 % (#26). Picked zones are a new job and start as one.
 
         Both paused codes resume: pausing a mow gives 0211, pausing a return
         gives 0221, and matching only 0211 meant a mower paused on its way to the
@@ -83,6 +89,15 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         client = self.coordinator.client
         sn = self._sn
         if self.data.get("state_code") in (STATE_PAUSED, STATE_PAUSED_RETURNING):
+            await self.coordinator.async_send(client.resume, sn)
+            return
+        progress = self.data.get("mowing_progress")
+        if (
+            self.data.get("docked")
+            and isinstance(progress, int)
+            and 0 < progress < 100
+            and not self.coordinator.selected_zone_ids
+        ):
             await self.coordinator.async_send(client.resume, sn)
             return
 
