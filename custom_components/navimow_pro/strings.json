@@ -56,7 +56,9 @@
         "description": "Zone list for the zone selector, as a comma-separated list of id:name pairs (for example: 1:Zone 1,5:Zone 2). The region id is the map partition id. Leave blank to rely on auto-discovery. Mower size: the size of the mower icon on the map, in percent of the default.",
         "data": {
           "zones": "Zones (id:name,...)",
-          "mower_scale": "Mower size on the map"
+          "mower_scale": "Mower size on the map",
+          "mower_path": "Draw the mower's own path (beta)",
+          "blade_gaps": "Leave out where the blade was stopped (beta)"
         }
       }
     }

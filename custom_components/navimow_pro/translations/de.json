@@ -56,7 +56,9 @@
         "description": "Zonenliste für die Zonenauswahl, als kommagetrennte Liste von id:Name-Paaren (zum Beispiel: 1:Zone 1,5:Zone 2). Die Regions-ID ist die ID der Kartenpartition. Leer lassen, um die automatische Erkennung zu verwenden. Mähroboter-Größe: die Größe des Mähroboter-Symbols auf der Karte, in Prozent der Standardgröße.",
         "data": {
           "zones": "Zonen (id:Name,...)",
-          "mower_scale": "Größe des Mähroboters auf der Karte"
+          "mower_scale": "Größe des Mähroboters auf der Karte",
+          "mower_path": "Eigenen Weg des Mähroboters zeichnen (Beta)",
+          "blade_gaps": "Abschnitte mit stehendem Messer auslassen (Beta)"
         }
       }
     }

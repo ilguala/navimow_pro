@@ -518,12 +518,25 @@ class NavimowCloudClient:
 
         Returns ``[{partitionId, area, finishedArea, partitionPercentage,
         startTime, endTime, endTimeAlias}, ...]`` -- the authoritative mowed
-        amount per zone (works while docked too). This is the
-        coverage source; the swept-path geometry (get-path-info-data-compress)
-        is not reachable standalone, so the trail is reconstructed from position.
+        amount per zone (works while docked too). This is the coverage source;
+        the swept path itself is :meth:`path_data`.
         """
         data = self.call("/vehicle/trail/get-path-info-time", {"vehicle_sn": sn})
         return data if isinstance(data, list) else []
+
+    def path_data(self, sn: str, zone_ids: list[int]) -> Any:
+        """The mower's own swept path for the given zones.
+
+        ``data`` is a base64 zstd-compressed JSON list, one row per zone:
+        ``{partitionId, partitionPercentage, startTime, endTime, points:
+        [{x, y, kr, pid, pt}, ...]}``. ``kr`` looks like the blade state ("01"
+        cutting, "00" on channels and at spots where it stopped) -- unconfirmed.
+        Found by vahesoo (NaviMower).
+        """
+        return self.call(
+            "/vehicle/trail/get-path-info-data-compress",
+            {"vehicle_sn": sn, "partitionList": [int(z) for z in zone_ids]},
+        )
 
     def map_detail_plain(self, sn: str, map_id: str, map_base_id: str) -> Any:
         """Uncompressed map detail: returns DeviceMapInfo with a `map_detail`

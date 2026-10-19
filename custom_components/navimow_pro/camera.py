@@ -284,6 +284,13 @@ class NavimowMapCamera(NavimowEntity, Camera):
         # lawn as one (no zone to know it by).
         trail_zones = data.get("trail_zones")
         runs = list(trail_zones.items()) if isinstance(trail_zones, dict) else [(None, trail)]
+        # Where the mower's own path is known (beta) it replaces the trail rebuilt
+        # here for that zone: one entry per stretch drawn, the live tail included.
+        path_zones = data.get("path_zones") or {}
+        if path_zones:
+            runs = [(z, p) for z, p in runs if z not in path_zones] + [
+                (z, run) for z, zone_runs in path_zones.items() for run in zone_runs
+            ]
 
         # Bounding box: derive it from the STABLE geometry (zones/off-limit/
         # VisionFence-off/channels/dock) first, then include only the dynamic points (mower +

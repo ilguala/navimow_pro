@@ -28,6 +28,11 @@ OPT_MOWER_SCALE: Final = "mower_scale"
 DEFAULT_MOWER_SCALE: Final = 100
 MOWER_SCALE_MIN: Final = 10
 MOWER_SCALE_MAX: Final = 300
+# The mower's own swept path (beta): drawn in place of the trail rebuilt from
+# position samples wherever the mower reports it, and the stretches it drove
+# with the blade stopped left out. Both can be turned off while being tried.
+OPT_MOWER_PATH: Final = "mower_path"
+OPT_BLADE_GAPS: Final = "blade_gaps"
 
 DEFAULT_LANGUAGE: Final = "en"
 
@@ -150,10 +155,9 @@ TRAIL_DECIDE_POLLS: Final = 5
 ERROR_CLEAR_POLLS: Final = 3
 
 # --- Coverage / mowed-trail overlay ----------------------------------------
-# We reconstruct the mowed area exactly like the app does: by sampling the
-# robot's position frequently while it cuts and painting the swept path. (The
-# app polls get-location over HTTP ~every 1.5-2 s; the cloud exposes no coverage
-# grid and get-path-info-data-compress is not reachable standalone.)
+# We reconstruct the mowed area by sampling the robot's position frequently
+# while it cuts and painting the swept path. Where the mower's own path is
+# available (get-path-info-data-compress, beta), that is drawn instead.
 SWATH_WIDTH_M: Final = 0.25  # approx cutting width (m) used as the trail stroke width
 # Cap on the points kept PER ZONE (oldest dropped first). One cap for the whole
 # lawn cut the start of a multi-day job off the map before it ended (#15).

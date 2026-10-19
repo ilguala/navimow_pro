@@ -69,6 +69,8 @@ from .const import (
     TRAIL_MAX_POINTS,
     TRAIL_MIN_STEP_M,
     ZONE_RESET_DROP,
+    OPT_BLADE_GAPS,
+    OPT_MOWER_PATH,
     VEHICLE_STATE_LABELS,
     VEHICLE_STATE_TO_ACTIVITY,
     decode_partition_id_list,
@@ -86,6 +88,10 @@ _SLOW_KEYS = ("set_list", "maintenance", "today_plan", "map_list")
 _MESSAGES_FOLLOWUP_S = 180
 _MESSAGES_GAP_S = 30
 _MESSAGES_KEEP = 10
+
+# The mower's own path (beta): read for the zone being cut at most this often,
+# once for the job's zones when the mower docks, and once after a restart.
+_PATH_MOWING_S = 60
 # A title the app did not fill in: "Completed on %@".
 _UNFILLED = re.compile(r"%(?:\d+\$)?[@a-zA-Z]|\{\{[^{}]*\}\}")
 
@@ -200,6 +206,20 @@ def _parse_zone_options(raw: str | None) -> list[dict]:
 # --------------------------------------------------------------------- map
 # Weekday numbering is 1=Sun .. 7=Sat.
 _WEEKDAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
+def _zstd_available() -> bool:
+    """Whether this host has a zstd decoder at all."""
+    try:
+        import compression.zstd  # noqa: F401  # type: ignore[import-not-found]
+        return True
+    except ImportError:
+        pass
+    try:
+        import zstandard  # noqa: F401  # type: ignore[import-not-found]
+        return True
+    except ImportError:
+        return False
 
 
 def _zstd_decompress(raw: bytes) -> bytes | None:
@@ -757,6 +777,92 @@ def _parse_messages(payload: Any) -> list[dict] | None:
     return [message for _, message in out[:_MESSAGES_KEEP]]
 
 
+def _decode_path_data(payload: Any) -> list[dict] | None:
+    """The rows of a get-path-info-data-compress answer, or None if unreadable.
+
+    The answer is base64 of a zstd frame of JSON; an already decoded list is
+    taken as it is. ``None`` covers both a garbled answer and a host with no
+    zstd decoder -- the map then keeps the trail it rebuilds itself.
+    """
+    if isinstance(payload, dict):
+        for key in ("data", "pathData", "path_data"):
+            if key in payload:
+                return _decode_path_data(payload[key])
+        return None
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, str) or not payload.strip():
+        return [] if payload in (None, "", []) else None
+    try:
+        frame = base64.b64decode(payload.strip(), validate=False)
+    except ValueError:
+        return None
+    raw = _zstd_decompress(frame)
+    if not raw:
+        return None
+    try:
+        rows = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
+
+
+def _parse_path_row(row: dict) -> dict | None:
+    """One zone of the mower's path: ``{zone, start, pct, points, blade_off}``.
+
+    ``points`` are ``[x, y, cut]``, ``cut`` True for kr "01", False for "00",
+    None when the field is missing or something else. Thinned to
+    TRAIL_MAX_POINTS by stride, keeping every point where ``cut`` changes so a
+    stretch with the blade stopped is not thinned away.
+    """
+    zid = _as_int(row.get("partitionId"))
+    if not zid or zid <= 0:
+        return None
+    points: list[list] = []
+    for p in row.get("points") or []:
+        if not isinstance(p, dict):
+            continue
+        x, y = _as_float(p.get("x")), _as_float(p.get("y"))
+        if x is None or y is None:
+            continue
+        kr = str(p.get("kr") or "").strip()
+        points.append([round(x, 2), round(y, 2), True if kr == "01" else False if kr == "00" else None])
+    if len(points) > TRAIL_MAX_POINTS:
+        stride = -(-len(points) // TRAIL_MAX_POINTS)
+        points = [
+            p for i, p in enumerate(points)
+            if i % stride == 0 or i == len(points) - 1 or p[2] != points[i - 1][2]
+        ]
+    return {
+        "zone": zid,
+        "start": _as_int(row.get("startTime")),
+        "pct": _as_int(row.get("partitionPercentage")),
+        "points": points,
+        "blade_off": sum(1 for p in points if p[2] is False),
+    }
+
+
+def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) -> list:
+    """Stretches to draw for one zone: the mower's path, then our live tail.
+
+    With ``blade_gaps`` a point where the blade was stopped breaks the stretch
+    and is not drawn. The tail -- our own samples since the path was read -- is
+    joined to the path's last point so the two read as one line.
+    """
+    runs: list[list[list[float]]] = [[]]
+    for x, y, cut in points:
+        if blade_gaps and cut is False:
+            if runs[-1]:
+                runs.append([])
+            continue
+        runs[-1].append([x, y])
+    runs = [run for run in runs if run]
+    if tail:
+        start = [runs[-1][-1]] if runs and points and not (blade_gaps and points[-1][2] is False) else []
+        runs.append(start + [list(p) for p in tail])
+    return runs
+
+
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     """Per-zone mowing coverage from get-path-info-time.
 
@@ -965,6 +1071,17 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._trail_store: Store = trail_store(hass, entry.entry_id)
         self._trail_dirty = False
         self._last_trail_save = 0.0  # time.monotonic() of the last real write
+        # The mower's own path (beta): per zone as last read, and where our own
+        # trail for that zone stood then -- what came after is the live tail.
+        options = getattr(entry, "options", None) or {}
+        self._path_enabled = bool(options.get(OPT_MOWER_PATH, True))
+        self.blade_gaps = bool(options.get(OPT_BLADE_GAPS, True))
+        self._paths: dict[int, dict] = {}
+        self._path_marks: dict[int, int] = {}
+        self._path_read = 0.0
+        self._path_primed = False
+        self._path_was_docked: bool | None = None
+        self._path_status = "off" if not self._path_enabled else "not read yet"
         # The message feed (#28): the state at the last poll, until when to keep
         # reading it after a return / dock / fault, and when it was last read.
         self._messages_state: str | None = None
@@ -1264,6 +1381,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             except NavimowError:
                 raw.setdefault("messages", {})
 
+        self._maybe_fetch_path(raw, state_code)
+
         # Slow, only every N cycles (or on the first successful fetch).
         if slow:
             getters = {
@@ -1283,6 +1402,88 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # id/edit-time so the 2 KB blob is only downloaded when it changes.
             self._maybe_fetch_map(raw)
         return self._parse(raw)
+
+    def _maybe_fetch_path(self, raw: dict, state_code: str) -> None:
+        """Read the mower's own path when it is worth it (beta).
+
+        Once after a restart for every zone with progress; every _PATH_MOWING_S
+        for the zone being cut; once for the job's zones when the mower docks.
+        Never for a zone at 0 % -- what the cloud keeps there belongs to an
+        earlier job -- and a zone's path is dropped when its coverage falls to 0
+        or a new cycle starts on it. A failure keeps what was read before; a
+        host that cannot decode the answer stops asking.
+        """
+        if not self._path_enabled or self._path_status == "no zstd decoder":
+            return
+        cov: dict[int, tuple[int, int | None]] = {}
+        for item in raw.get("path_info_time") or []:
+            if isinstance(item, dict):
+                zid = _as_int(item.get("partitionId"))
+                if zid:
+                    cov[zid] = (_as_int(item.get("partitionPercentage")) or 0, _as_int(item.get("startTime")))
+        with self._trail_lock:
+            for zid in list(self._paths):
+                pct, start = cov.get(zid, (0, None))
+                old = self._paths[zid].get("start")
+                if not pct or (start and old and start != old):
+                    del self._paths[zid]
+                    self._path_marks.pop(zid, None)
+
+        now = time.monotonic()
+        docked = is_docked(state_code)
+        with_progress = sorted(z for z, (p, _) in cov.items() if p)
+        want: list[int] = []
+        if not self._path_primed:
+            want = with_progress
+        elif state_code == STATE_MOWING:
+            location = raw.get("location") or {}
+            index2 = raw.get("index2") or {}
+            active_id, _ = _parse_work_position(
+                location.get("map_work_position") or index2.get("map_work_position")
+            )
+            if active_id in with_progress and now - self._path_read >= _PATH_MOWING_S:
+                want = [active_id]
+        elif docked and self._path_was_docked is False:
+            want = with_progress
+        self._path_was_docked = docked
+        if not cov:
+            return
+        self._path_primed = True
+        if not want:
+            return
+        self._path_read = now
+        try:
+            payload = self.client.path_data(self.sn, want)
+        except NavimowAuthError:
+            raise
+        except NavimowError as err:
+            self._path_status = f"error {err.code}"
+            return
+        rows = _decode_path_data(payload)
+        if rows is None:
+            self._path_status = "no zstd decoder" if not _zstd_available() else "unreadable answer"
+            return
+        with self._trail_lock:
+            for row in rows:
+                parsed = _parse_path_row(row)
+                if parsed and parsed["zone"] in want and parsed["points"]:
+                    self._paths[parsed["zone"]] = parsed
+                    self._path_marks[parsed["zone"]] = len(self._trail_zones.get(parsed["zone"]) or [])
+        self._path_status = "ok"
+
+    def _path_snapshot(self, trail_zones: dict) -> tuple[dict, dict]:
+        """What the map draws from the mower's path, and a summary for diagnostics."""
+        if not self._path_enabled:
+            return {}, {"state": "off"}
+        draw: dict[int, list] = {}
+        zones: dict[int, dict] = {}
+        with self._trail_lock:
+            for zid, path in self._paths.items():
+                own = trail_zones.get(zid) or []
+                tail = own[min(self._path_marks.get(zid, len(own)), len(own)):]
+                draw[zid] = _path_runs(path["points"], self.blade_gaps, tail)
+                zones[zid] = {"points": len(path["points"]), "blade_off": path["blade_off"], "tail": len(tail)}
+        return draw, {"state": self._path_status, "blade_gaps": self.blade_gaps, "zones": zones}
 
     def _maybe_fetch_map(self, raw: dict) -> None:
         """Fetch + decode the map once, then only when the map version changes."""
@@ -1454,6 +1655,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         trail_zones = self._update_trail(
             position, state_code, active_id, active_pct, coverage, map_geom.get("zones")
         )
+        path_zones, path_status = self._path_snapshot(trail_zones)
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
         if raw_error:
@@ -1595,6 +1797,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "coverage": coverage,
             # the app's messages, newest first (None: the feed did not answer)
             "messages": _parse_messages(raw.get("messages")),
+            # the mower's own path where known (beta): {zone id: [[[x,y],...], ...]}
+            "path_zones": path_zones,
+            "path_status": path_status,
             "trail_zones": trail_zones,
             "trail": [p for pts in trail_zones.values() for p in pts],
             # decoded map geometry (None until the map is fetched/decoded)

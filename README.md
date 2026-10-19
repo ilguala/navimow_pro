@@ -290,6 +290,11 @@ unavailable or reads `unknown` rather than the integration crashing:
   seconds for the mower itself to answer. If it does not, you get an error
   saying so -- but the command may still be carried out, so keep clear of the
   mower until it has visibly stopped or docked. Resume is sent without waiting.
+- **The mower's own path (beta).** Where the mower reports the path it actually
+  drove, the map draws that instead of the trail rebuilt from position samples,
+  leaving out the stretches where the blade was stopped. Both can be turned off
+  in *Configure*. The blade flag is not confirmed yet; if the map shows gaps
+  where the mower did cut, turn off "Leave out where the blade was stopped".
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or

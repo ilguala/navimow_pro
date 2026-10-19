@@ -27,6 +27,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -62,6 +63,8 @@ from .const import (
     DOMAIN,
     MOWER_SCALE_MAX,
     MOWER_SCALE_MIN,
+    OPT_BLADE_GAPS,
+    OPT_MOWER_PATH,
     OPT_MOWER_SCALE,
     OPT_ZONES,
     PASSWORD_MAX_LEN,
@@ -467,6 +470,8 @@ class NavimowOptionsFlow(OptionsFlow):
                     OPT_MOWER_SCALE: int(
                         user_input.get(OPT_MOWER_SCALE, DEFAULT_MOWER_SCALE)
                     ),
+                    OPT_MOWER_PATH: bool(user_input.get(OPT_MOWER_PATH, True)),
+                    OPT_BLADE_GAPS: bool(user_input.get(OPT_BLADE_GAPS, True)),
                 }
             )
 
@@ -488,6 +493,12 @@ class NavimowOptionsFlow(OptionsFlow):
                         mode=NumberSelectorMode.SLIDER,
                     )
                 ),
+                vol.Optional(
+                    OPT_MOWER_PATH, default=options.get(OPT_MOWER_PATH, True)
+                ): BooleanSelector(),
+                vol.Optional(
+                    OPT_BLADE_GAPS, default=options.get(OPT_BLADE_GAPS, True)
+                ): BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
