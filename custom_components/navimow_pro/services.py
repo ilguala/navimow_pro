@@ -23,6 +23,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
+from .api.client import NavimowCommandError
 from .const import (
     DOMAIN,
     encode_partition_ids,
@@ -241,12 +242,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
         partition_ids = encode_partition_ids(zones)
         partition_setup = mow_setup(reset=call.data["reset"], ordered=ordered)
         try:
-            await coordinator.async_send(
+            await coordinator.async_send_confirmed(
                 coordinator.client.mow_zones,
                 coordinator.sn,
                 partition_ids,
                 partition_setup,
             )
+        except NavimowCommandError as err:
+            # Not "failed": it may still happen (see NavimowCommandError).
+            raise HomeAssistantError(err.desc) from err
         except Exception as err:  # noqa: BLE001 - surface a clean error to the UI
             raise HomeAssistantError(f"Navimow mow failed: {err}") from err
 

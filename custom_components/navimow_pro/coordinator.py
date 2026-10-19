@@ -6,6 +6,7 @@ runs in one executor job per cycle so the event loop is never blocked.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -24,6 +25,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import NavimowAuthError, NavimowCloudClient, NavimowError, Tokens
+from .api.client import (
+    CMD_STATUS_ANSWERED,
+    CMD_STATUS_PENDING,
+    CMD_STATUS_QUEUED,
+    NavimowCommandError,
+)
 from .const import (
     ACTIVE_STATES,
     ACTIVITY_ERROR,
@@ -1885,3 +1892,70 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         """
         self._force_slow = True
         await self.async_refresh()
+
+    async def async_await_command(
+        self, cmd_num: str, *, timeout: float = 8.0, interval: float = 0.5
+    ) -> dict:
+        """Poll /vehicle/set/response until the mower answers, or time out.
+
+        Returns the last status seen. Does not raise: the caller decides what an
+        unanswered command means for it. A probe that fails is not an answer
+        either way, so polling carries on through it until the deadline; only a
+        dead session stops it.
+        """
+        deadline = self.hass.loop.time() + timeout
+        last: dict = {}
+        while True:
+            try:
+                status = await self.hass.async_add_executor_job(
+                    self.client.command_status, self.sn, cmd_num
+                )
+            except NavimowAuthError:
+                raise
+            except NavimowError as err:
+                _LOGGER.debug("command %s: status probe failed: %s", cmd_num, err)
+            else:
+                last = status if isinstance(status, dict) else {}
+                if last.get("status") == CMD_STATUS_ANSWERED:
+                    return last
+            if self.hass.loop.time() >= deadline:
+                return last
+            await asyncio.sleep(interval)
+
+    async def async_send_confirmed(self, func, *args, timeout: float = 8.0) -> dict:
+        """Send a command AND wait for the mower to acknowledge it.
+
+        /vehicle/set/send only reports that the *cloud* queued the command, so a
+        command the mower cannot parse used to look exactly like a successful
+        one: the service call returned in well under a second, raised nothing,
+        and the mower never moved. Anything the mower does answer comes back
+        within ~1 s, so a short wait separates the two cleanly.
+
+        Raises NavimowCommandError if no acknowledgement arrives.
+        """
+        result = await self.hass.async_add_executor_job(func, *args)
+        cmd_num = self.client.cmd_num_of(result)
+        try:
+            if not cmd_num:
+                # No command id to track -- nothing to confirm, report as before.
+                return result if isinstance(result, dict) else {}
+            status = await self.async_await_command(cmd_num, timeout=timeout)
+            # Only the two states measured as "not answered" count. A shape
+            # never seen -- another firmware, or no probe that got through --
+            # proves nothing, and raising on it would call every command on a
+            # working mower a failure.
+            if status.get("status") in (CMD_STATUS_QUEUED, CMD_STATUS_PENDING):
+                raise NavimowCommandError(cmd_num, status)
+            if status.get("status") != CMD_STATUS_ANSWERED:
+                _LOGGER.debug("command %s: no usable status (%s)", cmd_num, status)
+                return status
+            _LOGGER.debug(
+                "command %s acknowledged: %s",
+                cmd_num,
+                self.client.resp_data_of(status),
+            )
+            return status
+        finally:
+            self._persist_session()
+            self._force_slow = True
+            await self.async_request_refresh()

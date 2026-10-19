@@ -25,6 +25,7 @@ from .const import (
     model_lacks,
     mow_setup,
 )
+from .api.client import NavimowCommandError
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
 
@@ -58,6 +59,18 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
     def __init__(self, coordinator: NavimowCoordinator) -> None:
         super().__init__(coordinator, "mower")
 
+    async def _send(self, func, *args) -> None:
+        """Send a motion command and say so when the mower does not confirm it.
+
+        The cloud queues any command it can parse, so before the acknowledgement
+        was checked a mower that ignored the payload was indistinguishable from
+        one that obeyed: the button returned instantly and nothing happened.
+        """
+        try:
+            await self.coordinator.async_send_confirmed(func, *args)
+        except NavimowCommandError as err:
+            raise HomeAssistantError(err.desc) from err
+
     @property
     def activity(self) -> LawnMowerActivity:
         return _ACTIVITY_MAP.get(self.data.get("activity"), LawnMowerActivity.DOCKED)
@@ -88,6 +101,8 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         """
         client = self.coordinator.client
         sn = self._sn
+        # Resume is sent without waiting for a confirmation: a mower with
+        # nothing to resume need not answer it, and that is no failure.
         if self.data.get("state_code") in (STATE_PAUSED, STATE_PAUSED_RETURNING):
             await self.coordinator.async_send(client.resume, sn)
             return
@@ -115,7 +130,7 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         # robot choose its own route there -- as it must on a model that ignores
         # the custom order altogether (see FAMILY_LACKS).
         ordered = bool(sel) and not model_lacks(self.data.get("model"), "ordered_mow")
-        await self.coordinator.async_send(
+        await self._send(
             client.mow_zones,
             sn,
             partition_ids,
@@ -123,10 +138,10 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         )
 
     async def async_pause(self) -> None:
-        await self.coordinator.async_send(self.coordinator.client.pause, self._sn)
+        await self._send(self.coordinator.client.pause, self._sn)
 
     async def async_dock(self) -> None:
-        await self.coordinator.async_send(self.coordinator.client.dock, self._sn)
+        await self._send(self.coordinator.client.dock, self._sn)
 
     @property
     def extra_state_attributes(self) -> dict:

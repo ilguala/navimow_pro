@@ -286,6 +286,10 @@ unavailable or reads `unknown` rather than the integration crashing:
   so a field being present is not proof the feature exists. A short list of
   field-confirmed exceptions hides what a family does not have -- currently no
   remote cutting height on the i1, and no charge limit on the X3.
+- **Commands are confirmed.** Start (a new mow), Pause and Dock wait a few
+  seconds for the mower itself to answer. If it does not, you get an error
+  saying so -- but the command may still be carried out, so keep clear of the
+  mower until it has visibly stopped or docked. Resume is sent without waiting.
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or

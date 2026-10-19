@@ -74,6 +74,23 @@ def _ssl_context() -> ssl.SSLContext:
 
 
 CODE_OK = 1
+
+# --- /vehicle/set/response status codes --------------------------------------
+# /vehicle/set/send answers `status: 0` the moment the CLOUD has queued the
+# command, which is all we used to look at. The real outcome only shows up on
+# /vehicle/set/response:
+#
+#   2  delivered to the mower, still waiting for its reply
+#   3  the mower replied  (`desc` = "\u5df2\u5e94\u7b54" = "answered",
+#      `respData` carries the handler's result: {"count": N} for a settings
+#      write = the number of keys applied, or {} for a c:behavior command)
+#
+# A command the mower does not understand never leaves 2: it is not rejected and
+# there is no error code, it is simply never answered. That is what makes a
+# failed command indistinguishable from a successful one.
+CMD_STATUS_QUEUED = 0
+CMD_STATUS_PENDING = 2
+CMD_STATUS_ANSWERED = 3
 # Business codes that indicate an auth/session problem -> refresh + re-login.
 AUTH_ERROR_CODES = {
     90015,
@@ -114,6 +131,28 @@ class NavimowError(Exception):
 
 class NavimowAuthError(NavimowError):
     """Auth/session problem (token expired, wrong uid, kicked, bad creds)."""
+
+
+class NavimowCommandError(NavimowError):
+    """The cloud queued a command and the mower has not confirmed it.
+
+    Raised when /vehicle/set/response is still at "queued" or "delivered" once
+    the wait is over. That is not a refusal: the command may still be waiting
+    for the mower and be carried out later, which is why the message says so --
+    a mower that moves off after the owner was told nothing happened is worse
+    than one that never moves.
+    """
+
+    def __init__(self, cmd_num: str, last: dict | None = None) -> None:
+        last = last or {}
+        super().__init__(
+            "unconfirmed",
+            "The command was sent, but the mower did not confirm it. It may "
+            "still carry it out: keep clear of the mower until it has visibly "
+            f"stopped or docked. (command {cmd_num}, status {last.get('status')!r})",
+        )
+        self.cmd_num = cmd_num
+        self.last = last
 
 
 class NavimowCloudClient:
@@ -558,6 +597,24 @@ class NavimowCloudClient:
         return self.call(
             "/vehicle/set/response", {"vehicle_sn": sn, "cmd_num": cmd_num}
         ) or {}
+
+    @staticmethod
+    def cmd_num_of(result: Any) -> str:
+        """The command id in a /vehicle/set/send reply, or "" if absent."""
+        if isinstance(result, dict) and result.get("cmd_num"):
+            return str(result["cmd_num"])
+        return ""
+
+    @staticmethod
+    def resp_data_of(status: dict) -> Any:
+        """The mower's own reply payload, decoded. ``respData`` is a JSON string."""
+        raw = (status or {}).get("respData")
+        if not isinstance(raw, str):
+            return raw
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return raw
 
     # -------------------------------------------------------------- settings
     def save_setting(self, sn: str, data: dict) -> Any:
