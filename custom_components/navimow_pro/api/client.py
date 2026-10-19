@@ -462,6 +462,18 @@ class NavimowCloudClient:
     def map_list(self, sn: str) -> Any:
         return self.call("/map/index/map-list", {"vehicle_sn": sn})
 
+    def messages(self, sn: str) -> dict:
+        """The app's message feed for this mower, first page (newest).
+
+        Returns ``{vehicle_message_list: [...], has_history_message}``. Each
+        message carries a title, a body, a time and a code -- why a job ended,
+        a fault, a rain hold.
+        """
+        return self.call(
+            "/mowerbot/user/message/vehicleMessageListField",
+            {"vehicle_sn": sn, "message_id": "", "filter_state": "all"},
+        ) or {}
+
     def path_info_time(self, sn: str) -> list:
         """Per-zone mowing coverage for the current/last session.
 

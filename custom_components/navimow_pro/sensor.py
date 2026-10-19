@@ -104,12 +104,15 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
             {
                 "total_area": (d.get("coverage") or {}).get("total_area"),
                 "finished_area": (d.get("coverage") or {}).get("finished_area"),
+                # raw end-of-session code (endTimeAlias), meanings not known yet
+                "last_end_code": (d.get("coverage") or {}).get("last_end_code"),
                 "zones": [
                     {
                         "name": z.get("name"),
                         "percentage": z.get("pct"),
                         "finished_area": z.get("finished"),
                         "area": z.get("area"),
+                        "end_code": z.get("end_code"),
                     }
                     for z in (d.get("coverage") or {}).get("zones") or []
                 ],
@@ -191,6 +194,29 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
             "code": next(iter(d.get("error_codes") or []), None),
             "state_code": d.get("state_code"),
         },
+    ),
+    NavimowSensorDescription(
+        key="last_message",
+        translation_key="last_message",
+        icon="mdi:message-text-outline",
+        # The newest message from the app's message centre: why the mower went
+        # home, a fault, a rain hold (#28). Unknown when the feed does not answer.
+        value_fn=lambda d: (
+            None
+            if d.get("messages") is None
+            else (d["messages"][0]["text"] if d["messages"] else "No messages")
+        ),
+        attrs_fn=lambda d: (
+            {
+                "time": d["messages"][0]["time"],
+                "title": d["messages"][0]["title"],
+                "content": d["messages"][0]["content"],
+                "code": d["messages"][0]["code"],
+                "recent": d["messages"],
+            }
+            if d.get("messages")
+            else None
+        ),
     ),
     NavimowSensorDescription(
         key="signal_wifi",

@@ -13,7 +13,7 @@ import logging
 import re
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -58,6 +58,7 @@ from .const import (
     SWATH_WIDTH_M,
     STATE_FAMILY_LABELS,
     STATE_MOWING,
+    STATE_RETURNING,
     TRAIL_MAX_POINTS,
     TRAIL_MIN_STEP_M,
     ZONE_RESET_DROP,
@@ -71,6 +72,15 @@ _LOGGER = logging.getLogger(__name__)
 
 # Slow-changing endpoints refreshed only every SLOW_REFRESH_EVERY cycles.
 _SLOW_KEYS = ("set_list", "maintenance", "today_plan", "map_list")
+
+# The app's message feed (#28) is read on the slow cycle, and also for a few
+# minutes after the mower heads home, docks or faults -- the moments someone
+# wants to know why -- at most every _MESSAGES_GAP_S seconds.
+_MESSAGES_FOLLOWUP_S = 180
+_MESSAGES_GAP_S = 30
+_MESSAGES_KEEP = 10
+# A title the app did not fill in: "Completed on %@".
+_UNFILLED = re.compile(r"%(?:\d+\$)?[@a-zA-Z]|\{\{[^{}]*\}\}")
 
 # Persist the reconstructed mowed trail so it survives HA restarts/updates.
 # The store is written at most once per _TRAIL_SAVE_DELAY seconds and only when
@@ -680,18 +690,84 @@ def _parse_errors(payload: Any, inline: Any) -> tuple[bool, str | None, list[str
     return True, text, codes
 
 
+def _first(item: dict, *keys: str) -> Any:
+    """The first of ``keys`` the item has with a value."""
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _parse_messages(payload: Any) -> list[dict] | None:
+    """The app's message feed, newest first: ``[{time, title, content, code, text}]``.
+
+    ``None`` when the feed did not answer, ``[]`` when it answered with nothing.
+    ``text`` is what the app shows as the headline: the title, or the body when
+    the title is missing or was never filled in ("Completed on %@" is a real
+    one), or the bare code as a last resort.
+    """
+    if not isinstance(payload, dict) or "vehicle_message_list" not in payload:
+        return None
+    items = payload.get("vehicle_message_list")
+    out: list[tuple[float, dict]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        stamp = _as_float(
+            _first(item, "addtime", "add_time", "create_time", "createTime", "timestamp", "time")
+        )
+        if stamp and stamp > 10_000_000_000:  # milliseconds
+            stamp /= 1000.0
+        title = str(_first(item, "title", "message_title", "messageTitle") or "").strip()
+        content = " ".join(
+            str(_first(item, "content", "message_content", "messageContent") or "").split()
+        )
+        if _UNFILLED.search(title):
+            title = ""
+        code = _first(item, "vendor_code", "error_code", "event_code", "message_code", "code")
+        code = str(code).strip() if code is not None else None
+        text = title or content or (f"Message {code}" if code else "")
+        if not text:
+            continue
+        try:
+            when = datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None
+        except (OverflowError, OSError, ValueError):
+            when = None
+        out.append(
+            (
+                stamp or 0.0,
+                {
+                    "time": when,
+                    "title": title[:255] or None,
+                    "content": content[:255] or None,
+                    "code": code,
+                    "text": text[:255],
+                },
+            )
+        )
+    out.sort(key=lambda pair: pair[0], reverse=True)
+    return [message for _, message in out[:_MESSAGES_KEEP]]
+
+
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     """Per-zone mowing coverage from get-path-info-time.
 
-    Input: ``[{partitionId, area, finishedArea, partitionPercentage}, ...]``.
-    Output: ``{overall_pct, total_area, finished_area, zones:[{id,name,area,
-    finished,pct}]}`` or ``None`` when there is nothing to report.
+    Input: ``[{partitionId, area, finishedArea, partitionPercentage, endTime,
+    endTimeAlias}, ...]``. Output: ``{overall_pct, total_area, finished_area,
+    last_end_code, zones:[{id,name,area,finished,pct,end_code}]}`` or ``None``
+    when there is nothing to report.
+
+    ``endTimeAlias`` looks like the reason a zone's session ended (8 came with a
+    low-battery return, #28), but its meanings are not known yet, so it is
+    passed on raw: per zone, and for the zone that ended last.
     """
     if not isinstance(raw_list, list) or not raw_list:
         return None
     zones: list[dict] = []
     tot_area = 0.0
     tot_fin = 0.0
+    last_end: tuple[float, int | None] = (0.0, None)
     for it in raw_list:
         if not isinstance(it, dict):
             continue
@@ -703,6 +779,10 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
             tot_area += area
         if fin is not None:
             tot_fin += fin
+        end_code = _as_int(it.get("endTimeAlias"))
+        end_time = _as_float(it.get("endTime"))
+        if end_code is not None and end_code != -1 and end_time and end_time > last_end[0]:
+            last_end = (end_time, end_code)
         zones.append(
             {
                 "id": zid,
@@ -710,6 +790,7 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
                 "area": area,
                 "finished": fin,
                 "pct": pct,
+                "end_code": end_code,
             }
         )
     if not zones:
@@ -719,6 +800,7 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
         "overall_pct": overall,
         "total_area": round(tot_area, 2),
         "finished_area": round(tot_fin, 2),
+        "last_end_code": last_end[1],
         "zones": zones,
     }
 
@@ -876,6 +958,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._trail_store: Store = trail_store(hass, entry.entry_id)
         self._trail_dirty = False
         self._last_trail_save = 0.0  # time.monotonic() of the last real write
+        # The message feed (#28): the state at the last poll, until when to keep
+        # reading it after a return / dock / fault, and when it was last read.
+        self._messages_state: str | None = None
+        self._messages_until = 0.0
+        self._messages_read = 0.0
         # A fault, and how many polls in a row have since reported nothing. The
         # fault is held over a short run of quiet polls (see _hold_error).
         self._error_held: tuple[str | None, list[str]] | None = None
@@ -1141,6 +1228,34 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 raw.setdefault("errors", {})
         else:
             raw["errors"] = {}
+
+        # The app's message feed (#28): on the slow cycle, and for a few minutes
+        # after the mower heads home, docks or stops on a fault -- the message
+        # explaining why can land a little after the state does.
+        now = time.monotonic()
+        prev_state, self._messages_state = self._messages_state, state_code
+        if (
+            prev_state is not None
+            and state_code != prev_state
+            and (
+                state_code == STATE_RETURNING
+                or is_docked(state_code)
+                or (state_code and state_code not in KNOWN_STATES)
+            )
+        ):
+            self._messages_until = now + _MESSAGES_FOLLOWUP_S
+        if (
+            slow
+            or "messages" not in raw
+            or (now < self._messages_until and now - self._messages_read >= _MESSAGES_GAP_S)
+        ):
+            self._messages_read = now
+            try:
+                raw["messages"] = self.client.messages(sn)
+            except NavimowAuthError:
+                raise
+            except NavimowError:
+                raw.setdefault("messages", {})
 
         # Slow, only every N cycles (or on the first successful fetch).
         if slow:
@@ -1471,6 +1586,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # ({zone id: [[x,y],...]}, 0 = no zone reported) and all of it as one
             # list, for anything that wants the whole lawn.
             "coverage": coverage,
+            # the app's messages, newest first (None: the feed did not answer)
+            "messages": _parse_messages(raw.get("messages")),
             "trail_zones": trail_zones,
             "trail": [p for pts in trail_zones.values() for p in pts],
             # decoded map geometry (None until the map is fetched/decoded)

@@ -26,7 +26,7 @@ All entities live under a single Home Assistant device (the mower).
 | Platform | Entity | Notes |
 |---|---|---|
 | `lawn_mower` | Mower | Start / Pause / Dock. Start resumes a paused mow, and carries on with an unfinished job when the mower is docked and no zones are picked |
-| `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
+| `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Last message, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
 | `binary_sensor` | Problem, Online, Docked | A fault is held briefly after the cloud stops reporting it, so the sensor does not flicker |
 | `number` | Cutting height, battery thresholds | Created only on mowers that report the setting; bounded by the values the machine accepts |
 | `calendar` | Mowing schedule | Read-only view of the weekly plan |
@@ -286,6 +286,12 @@ unavailable or reads `unknown` rather than the integration crashing:
   so a field being present is not proof the feature exists. A short list of
   field-confirmed exceptions hides what a family does not have -- currently no
   remote cutting height on the i1, and no charge limit on the X3.
+- **Last message** is the newest entry of the app's message centre (why the
+  mower went home, a fault, a rain hold), with the last few as attributes. It is
+  read now and then, and for a few minutes after the mower heads home, docks or
+  faults. New, and only seen on a few models so far. The Coverage sensor also
+  carries the raw end-of-session code (`last_end_code`), whose meanings are not
+  known yet.
 - **Zone order on the H800 and H1500.** These mowers ignore a zone mow that
   asks for a particular order, so they are sent the zones you pick without one:
   they mow those zones, in an order of their own choosing.

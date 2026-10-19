@@ -98,6 +98,9 @@
       "error_text": {
         "name": "Erreur"
       },
+      "last_message": {
+        "name": "Dernier message"
+      },
       "signal_wifi": {
         "name": "Signal Wi-Fi"
       },
