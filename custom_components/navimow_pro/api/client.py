@@ -134,18 +134,22 @@ class NavimowAuthError(NavimowError):
 
 
 class NavimowCommandError(NavimowError):
-    """The cloud queued a command but the mower never carried it out.
+    """The cloud queued a command and the mower has not confirmed it.
 
-    Raised when /vehicle/set/response never reaches CMD_STATUS_ANSWERED. The
-    cloud call itself succeeded, so nothing else in the stack would have failed.
+    Raised when /vehicle/set/response is still at "queued" or "delivered" once
+    the wait is over. That is not a refusal: the command may still be waiting
+    for the mower and be carried out later, which is why the message says so --
+    a mower that moves off after the owner was told nothing happened is worse
+    than one that never moves.
     """
 
     def __init__(self, cmd_num: str, last: dict | None = None) -> None:
         last = last or {}
         super().__init__(
-            "unacknowledged",
-            f"the mower never answered command {cmd_num} "
-            f"(last status {last.get('status')!r})",
+            "unconfirmed",
+            "The command was sent, but the mower did not confirm it. It may "
+            "still carry it out: keep clear of the mower until it has visibly "
+            f"stopped or docked. (command {cmd_num}, status {last.get('status')!r})",
         )
         self.cmd_num = cmd_num
         self.last = last

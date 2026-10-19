@@ -25,7 +25,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import NavimowAuthError, NavimowCloudClient, NavimowError, Tokens
-from .api.client import CMD_STATUS_ANSWERED, NavimowCommandError
+from .api.client import (
+    CMD_STATUS_ANSWERED,
+    CMD_STATUS_PENDING,
+    CMD_STATUS_QUEUED,
+    NavimowCommandError,
+)
 from .const import (
     ACTIVE_STATES,
     ACTIVITY_ERROR,
@@ -1894,18 +1899,25 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         """Poll /vehicle/set/response until the mower answers, or time out.
 
         Returns the last status seen. Does not raise: the caller decides what an
-        unanswered command means for it.
+        unanswered command means for it. A probe that fails is not an answer
+        either way, so polling carries on through it until the deadline; only a
+        dead session stops it.
         """
         deadline = self.hass.loop.time() + timeout
         last: dict = {}
         while True:
-            last = await self.hass.async_add_executor_job(
-                self.client.command_status, self.sn, cmd_num
-            )
-            if not isinstance(last, dict):
-                last = {}
-            if last.get("status") == CMD_STATUS_ANSWERED:
-                return last
+            try:
+                status = await self.hass.async_add_executor_job(
+                    self.client.command_status, self.sn, cmd_num
+                )
+            except NavimowAuthError:
+                raise
+            except NavimowError as err:
+                _LOGGER.debug("command %s: status probe failed: %s", cmd_num, err)
+            else:
+                last = status if isinstance(status, dict) else {}
+                if last.get("status") == CMD_STATUS_ANSWERED:
+                    return last
             if self.hass.loop.time() >= deadline:
                 return last
             await asyncio.sleep(interval)
@@ -1928,8 +1940,15 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 # No command id to track -- nothing to confirm, report as before.
                 return result if isinstance(result, dict) else {}
             status = await self.async_await_command(cmd_num, timeout=timeout)
-            if status.get("status") != CMD_STATUS_ANSWERED:
+            # Only the two states measured as "not answered" count. A shape
+            # never seen -- another firmware, or no probe that got through --
+            # proves nothing, and raising on it would call every command on a
+            # working mower a failure.
+            if status.get("status") in (CMD_STATUS_QUEUED, CMD_STATUS_PENDING):
                 raise NavimowCommandError(cmd_num, status)
+            if status.get("status") != CMD_STATUS_ANSWERED:
+                _LOGGER.debug("command %s: no usable status (%s)", cmd_num, status)
+                return status
             _LOGGER.debug(
                 "command %s acknowledged: %s",
                 cmd_num,

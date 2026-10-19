@@ -60,7 +60,7 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         super().__init__(coordinator, "mower")
 
     async def _send(self, func, *args) -> None:
-        """Send a motion command and surface a silent refusal as a real error.
+        """Send a motion command and say so when the mower does not confirm it.
 
         The cloud queues any command it can parse, so before the acknowledgement
         was checked a mower that ignored the payload was indistinguishable from
@@ -69,11 +69,7 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         try:
             await self.coordinator.async_send_confirmed(func, *args)
         except NavimowCommandError as err:
-            raise HomeAssistantError(
-                "The mower did not acknowledge the command. The cloud accepted "
-                "it, but the mower never carried it out -- it may not understand "
-                f"this command on this model. ({err.desc})"
-            ) from err
+            raise HomeAssistantError(err.desc) from err
 
     @property
     def activity(self) -> LawnMowerActivity:
@@ -105,8 +101,10 @@ class NavimowLawnMower(NavimowEntity, LawnMowerEntity):
         """
         client = self.coordinator.client
         sn = self._sn
+        # Resume is sent without waiting for a confirmation: a mower with
+        # nothing to resume need not answer it, and that is no failure.
         if self.data.get("state_code") in (STATE_PAUSED, STATE_PAUSED_RETURNING):
-            await self._send(client.resume, sn)
+            await self.coordinator.async_send(client.resume, sn)
             return
         progress = self.data.get("mowing_progress")
         if (
