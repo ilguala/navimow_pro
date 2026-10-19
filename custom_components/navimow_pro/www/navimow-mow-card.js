@@ -49,6 +49,22 @@ const STRINGS = {
     noSensor: "Sensore schedule non trovato.",
     noZones: "Nessuna zona disponibile.",
   },
+  de: {
+    title: "Jetzt mähen",
+    button: "Mähen",
+    allZones: "Alle Zonen",
+    zone: "Zone",
+    seqHint: "Tippe die Zonen in der Reihenfolge an, in der sie gemäht werden sollen. Keine = alle Zonen, der Roboter wählt die Route.",
+    reset: "Von vorne beginnen",
+    resetHint: "An: die ganze Zone neu mähen. Aus: nur die noch ungemähte Fläche fortsetzen.",
+    start: "Starten",
+    cancel: "Abbrechen",
+    starting: "Wird gestartet…",
+    started: "Mähen gestartet",
+    error: "Start fehlgeschlagen",
+    noSensor: "Zeitplan-Sensor nicht gefunden.",
+    noZones: "Noch keine Zonen bekannt.",
+  },
 };
 
 const ALL = "__all__";
@@ -115,7 +131,9 @@ class NavimowMowCard extends HTMLElement {
 
   _lang() {
     const l = (this._hass?.language || "en").toLowerCase();
-    return l.startsWith("it") ? "it" : "en";
+    if (l.startsWith("it")) return "it";
+    if (l.startsWith("de")) return "de";
+    return "en";
   }
   _t() {
     return STRINGS[this._lang()];
