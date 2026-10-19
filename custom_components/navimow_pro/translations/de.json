@@ -53,9 +53,10 @@
     "step": {
       "init": {
         "title": "Navimow-Optionen",
-        "description": "Zonenliste für die Zonenauswahl, als kommagetrennte Liste von id:Name-Paaren (zum Beispiel: 1:Zone 1,5:Zone 2). Die Regions-ID ist die ID der Kartenpartition. Leer lassen, um die automatische Erkennung zu verwenden.",
+        "description": "Zonenliste für die Zonenauswahl, als kommagetrennte Liste von id:Name-Paaren (zum Beispiel: 1:Zone 1,5:Zone 2). Die Regions-ID ist die ID der Kartenpartition. Leer lassen, um die automatische Erkennung zu verwenden. Mähroboter-Größe: die Größe des Mähroboter-Symbols auf der Karte, in Prozent der Standardgröße.",
         "data": {
-          "zones": "Zonen (id:Name,...)"
+          "zones": "Zonen (id:Name,...)",
+          "mower_scale": "Größe des Mähroboters auf der Karte"
         }
       }
     }
@@ -235,6 +236,21 @@
       },
       "rain_delay_time": {
         "name": "Wartezeit nach Regen"
+      }
+    },
+    "event": {
+      "mower_event": {
+        "name": "Mähroboter-Ereignisse",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "mowing_started": "Mähen gestartet",
+              "returned_to_dock": "Zur Ladestation zurückgekehrt",
+              "mowing_finished": "Mähen beendet",
+              "error": "Fehler"
+            }
+          }
+        }
       }
     },
     "camera": {
