@@ -63,9 +63,9 @@ PASSPORT_HOSTS: Final = {
     "fra": ("api-passport-fra.willand.com", "api-passport-fra.ninebot.com"),
     "sg": ("api-passport-sg.willand.com", "api-passport-sg.ninebot.com"),
     "us": (
+        "api-passport-ore.willand.com",  # official US/ore Passport host
         "api-passport-us.ninebot.com",
         "api-passport-ore.ninebot.com",  # same IP; the code a US account reports
-        "api-passport-ore.willand.com",
     ),
     "bj": ("api-passport-bj.willand.com", "api-passport-bj.ninebot.com"),
 }
