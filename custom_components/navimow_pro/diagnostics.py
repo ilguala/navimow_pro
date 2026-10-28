@@ -255,4 +255,5 @@ async def async_get_config_entry_diagnostics(
     data["map_inventory"] = coordinator.map_inventory or "map not decoded"
     data["raw"] = _redact(_trim(raw), frozen)
     data["snapshot"] = _redact(_trim(coordinator.data or {}), frozen)
+    data["setting_writes"] = _redact(coordinator.setting_writes, frozen)
     return data
