@@ -1038,6 +1038,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # but the entity keeps showing the cached set_list until the slow cycle
         # comes round -- up to 12 minutes once idle polling slowed to 120 s.
         self._force_slow = False
+        self._setting_write_lock = asyncio.Lock()
+        self._setting_checks: dict[str, asyncio.Task] = {}
+        self.setting_writes: dict[str, dict[str, Any]] = {}
+        self._settings_read_generation = 0
+        self._settings_read_success = False
         # Next scheduled mow, kept from the last parse so the poll loop can tell
         # when to stop idling (see _poll_interval).
         self._next_mow_at: Any = None
@@ -1199,7 +1204,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
     # ------------------------------------------------------------------ poll
     async def _async_update_data(self) -> dict:
         try:
-            snapshot = await self.hass.async_add_executor_job(self._fetch_blocking)
+            # A poll must not observe a device write before its cloud save.
+            async with self._setting_write_lock:
+                snapshot = await self.hass.async_add_executor_job(self._fetch_blocking)
         except NavimowAuthError as err:
             # Trigger the HA reauth flow (user must re-enter the password).
             # Back the poll off so a dead session isn't retried every 3 s.
@@ -1286,6 +1293,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
 
     def _fetch_blocking(self) -> dict:
         """Runs in an executor thread. Fetches + parses one snapshot."""
+        self._settings_read_success = False
         sn, vtype = self.sn, self.vehicle_type
         raw = self._raw_cache
 
@@ -1394,6 +1402,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             for key, getter in getters.items():
                 try:
                     raw[key] = getter()
+                    if key == "set_list":
+                        self._settings_read_generation += 1
+                        self._settings_read_success = True
                 except NavimowAuthError:
                     raise
                 except NavimowError:
@@ -2077,6 +2088,91 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         return None
 
     # -------------------------------------------------------------- commands
+    async def async_write_setting(self, key: str, on: bool, operations: list) -> None:
+        """Submit both setting stages before refreshing; verify without retrying."""
+        async with self._setting_write_lock:
+            if previous := self._setting_checks.pop(key, None):
+                previous.cancel()
+            record = {"requested": on, "submission": "pending", "completed_stages": 0}
+            self.setting_writes[key] = record
+            results = []
+
+            def write():
+                for func, *args in operations:
+                    results.append(func(*args))
+
+            try:
+                await self.hass.async_add_executor_job(write)
+            except Exception:
+                record["submission"] = "partial_failure" if results else "failed"
+                raise
+            else:
+                record["submission"] = "submitted"
+            finally:
+                record["completed_stages"] = len(results)
+                self._persist_session()
+                self._force_slow = True
+                _LOGGER.debug("Setting %s: %s", key, record)
+                # Even a failed second stage may have changed the mower. Read
+                # it back, but never resubmit a command automatically.
+                cmd_num = self.client.cmd_num_of(results[0]) if results else ""
+                self._setting_checks[key] = self.hass.async_create_background_task(
+                    self._async_check_setting(key, record, cmd_num),
+                    f"Navimow setting check: {key}",
+                )
+        await self.async_request_refresh()
+
+    async def _async_check_setting(self, key: str, record: dict, cmd_num: str) -> None:
+        """Keep queue acknowledgement separate from fresh settings readback."""
+        try:
+            previous_delay = 0
+            for delay in (15, 75):
+                await asyncio.sleep(delay - previous_delay)
+                previous_delay = delay
+                if cmd_num:
+                    try:
+                        reply = await self.hass.async_add_executor_job(
+                            self.client.command_status, self.sn, cmd_num
+                        )
+                        status = reply.get("status") if isinstance(reply, dict) else None
+                        # Do not log arbitrary response payloads or command IDs.
+                        record["command_status"] = (
+                            int(status) if str(status).isdigit() and len(str(status)) < 3
+                            else "unknown"
+                        )
+                    except NavimowError:
+                        record["command_status"] = "unavailable"
+                generation = self._settings_read_generation
+                await self.async_refresh_settings()
+                record["check_after_seconds"] = delay
+                if (not self.last_update_success
+                        or not self._settings_read_success
+                        or self._settings_read_generation == generation):
+                    record["readback"] = "unavailable"
+                    record.pop("observed", None)
+                else:
+                    value = (self.data or {}).get("settings", {}).get(key)
+                    record["observed"] = value
+                    record["readback"] = (
+                        "unavailable" if value is None else
+                        "matched" if value == record["requested"] else "mismatch"
+                    )
+                _LOGGER.debug("Setting %s: %s", key, record)
+        except Exception:
+            record["readback"] = "unavailable"
+            _LOGGER.debug("Setting %s: follow-up unavailable", key)
+        finally:
+            if self._setting_checks.get(key) is asyncio.current_task():
+                self._setting_checks.pop(key, None)
+
+    async def async_cancel_setting_checks(self) -> None:
+        """Stop follow-ups before closing the client on unload."""
+        tasks = list(self._setting_checks.values())
+        self._setting_checks.clear()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     async def async_send(self, func, *args) -> Any:
         """Run a client command in the executor then request a quick refresh."""
         result = await self.hass.async_add_executor_job(func, *args)

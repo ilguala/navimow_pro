@@ -14,6 +14,8 @@ the real one is used.
 import importlib.util
 import sys
 import types
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent / "custom_components"
@@ -64,6 +66,8 @@ if importlib.util.find_spec("homeassistant") is None:
         "homeassistant.components",
         "homeassistant.components.camera",
         "homeassistant.components.event",
+        "homeassistant.components.switch",
+        "homeassistant.const",
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.exceptions",
@@ -76,3 +80,17 @@ if importlib.util.find_spec("homeassistant") is None:
         "homeassistant.util.dt",
     ):
         sys.modules[name] = _placeholder_module(name)
+
+    @dataclass(frozen=True, kw_only=True)
+    class SwitchEntityDescription:
+        key: str
+        translation_key: str | None = None
+        icon: str | None = None
+        entity_category: object = None
+
+    class EntityCategory(Enum):
+        CONFIG = "config"
+        DIAGNOSTIC = "diagnostic"
+
+    sys.modules["homeassistant.components.switch"].SwitchEntityDescription = SwitchEntityDescription
+    sys.modules["homeassistant.const"].EntityCategory = EntityCategory

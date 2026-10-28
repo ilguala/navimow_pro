@@ -257,4 +257,5 @@ async def async_get_config_entry_diagnostics(
     # Coordinates of the mower's own path stay out; path_status has the counts.
     snapshot = {k: v for k, v in (coordinator.data or {}).items() if k != "path_zones"}
     data["snapshot"] = _redact(_trim(snapshot), frozen)
+    data["setting_writes"] = _redact(coordinator.setting_writes, frozen)
     return data

@@ -137,6 +137,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if coordinator is not None:
+            await coordinator.async_cancel_setting_checks()
             # Hand back the pooled HTTPS connection, or a reload leaks a socket.
             await hass.async_add_executor_job(coordinator.client.close)
     return unload_ok
