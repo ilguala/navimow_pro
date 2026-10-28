@@ -293,8 +293,9 @@ unavailable or reads `unknown` rather than the integration crashing:
 - **The mower's own path (beta).** Where the mower reports the path it actually
   drove, the map draws that instead of the trail rebuilt from position samples,
   leaving out the stretches where the blade was stopped. Both can be turned off
-  in *Configure*. The blade flag is not confirmed yet; if the map shows gaps
-  where the mower did cut, turn off "Leave out where the blade was stopped".
+  in *Configure*. The blade flag matches where the mower drives without cutting,
+  though it is not confirmed on the blade itself; if the map shows gaps where
+  the mower did cut, turn off "Leave out where the blade was stopped".
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or
