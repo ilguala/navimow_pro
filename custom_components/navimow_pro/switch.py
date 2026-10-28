@@ -41,6 +41,8 @@ class NavimowSwitchDescription(SwitchEntityDescription):
     core: bool = False
     # "modern" settings: write via save-set-data + operation_type:iot_set.
     iot: bool = False
+    # Rain settings also need a device write, but keep the legacy cloud form.
+    legacy_device_write: bool = False
     # iot value encoding: True => JSON number (1/0), False => string ('1'/'0').
     numeric: bool = False
     # Device command (cmdCode s:mower on /vehicle/set/send) fired alongside the
@@ -93,6 +95,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         value_fn=lambda s: s.get("rain_sensor"),
         write_key="rainSensor",
         core=True,
+        legacy_device_write=True,
     ),
     NavimowSwitchDescription(
         key="rain_detection",
@@ -102,6 +105,7 @@ SWITCHES: tuple[NavimowSwitchDescription, ...] = (
         value_fn=lambda s: s.get("rain_detection"),
         write_key="rainDetectionSwitch",
         core=True,
+        legacy_device_write=True,
     ),
     NavimowSwitchDescription(
         key="sound",
@@ -352,32 +356,34 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
 
     async def _write(self, on: bool) -> None:
         desc = self.entity_description
-        if desc.iot:
-            # 1) device command first -- makes the robot actually apply it (the
-            #    cloud copy alone is reverted by the robot). While mowing this is
-            #    refused and aborts before the cloud write, same as the app.
+        operations = []
+        if desc.iot or desc.legacy_device_write:
+            # Submit to the mower first. A request error aborts the cloud save;
+            # a queued command still needs separate acknowledgement/readback.
             robot_val: Any = (1 if on else 0) if desc.robot_numeric else ("1" if on else "0")
-            await self.coordinator.async_send(
+            operations.append((
                 self.coordinator.client.send_setting_device,
                 self._sn,
                 {desc.robot_key or desc.write_key: robot_val},
-            )
+            ))
+        if desc.iot:
             # 2) cloud persist (save-set-data + iot_set)
-            await self.coordinator.async_send(
+            operations.append((
                 self.coordinator.client.set_iot_bool,
                 self._sn,
                 self.coordinator.vehicle_type,
                 desc.write_key,
                 on,
                 desc.numeric,
-            )
+            ))
         else:
-            await self.coordinator.async_send(
+            operations.append((
                 self.coordinator.client.set_bool_setting,
                 self._sn,
                 desc.write_key,
                 on,
-            )
+            ))
+        await self.coordinator.async_write_setting(desc.key, on, operations)
         if self._attr_assumed_state:
             self._optimistic = on
             self.async_write_ha_state()
