@@ -407,6 +407,11 @@ def decode_partition_id_list(be_hex: str) -> list[int]:
 # fresh read of the settings and decides.
 CUT_HEIGHT_CONFIRM_S: Final = 30
 
+# Seconds a switched setting shows the new value before the mower confirms it.
+# The last readback runs about 75 s after the write (#31); this leaves time for
+# it, after which the switch shows whatever the mower reports.
+SETTING_CONFIRM_S: Final = 90
+
 
 # What the shared payload advertises on a model family that does not actually
 # have it -- each entry confirmed in the field, never inferred (#12). Every model

@@ -6,8 +6,14 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.navimow_pro import coordinator as coord_mod
+from custom_components.navimow_pro import switch as switch_mod
 from custom_components.navimow_pro.api import NavimowError
-from custom_components.navimow_pro.const import CONF_DEVICE_ID, CONF_VEHICLE_SN
+from custom_components.navimow_pro.const import (
+    CONF_DEVICE_ID,
+    CONF_VEHICLE_SN,
+    SETTING_CONFIRM_S,
+)
+from custom_components.navimow_pro.entity import NavimowEntity
 from custom_components.navimow_pro.switch import NavimowSwitch, SWITCHES
 
 
@@ -37,6 +43,44 @@ def make_coordinator():
     return co
 
 
+class Timers:
+    """async_call_later stand-in: records the delay, fires on demand."""
+
+    def __init__(self):
+        self.pending = []
+
+    def __call__(self, hass, delay, action):
+        entry = [delay, action]
+        self.pending.append(entry)
+        return lambda: self.pending.remove(entry)
+
+    def fire(self):
+        for delay, action in list(self.pending):
+            self.pending.remove([delay, action])
+            action(None)
+
+
+@pytest.fixture
+def timers(monkeypatch):
+    timers = Timers()
+    monkeypatch.setattr(switch_mod, "async_call_later", timers)
+    # The placeholder HA base class has no coordinator hook to chain to.
+    monkeypatch.setattr(
+        NavimowEntity, "_handle_coordinator_update",
+        lambda self: self.async_write_ha_state(), raising=False,
+    )
+    return timers
+
+
+def make_switch(co, key):
+    entity = NavimowSwitch(co, next(d for d in SWITCHES if d.key == key))
+    entity.coordinator = co  # the lightweight HA base class stub stores nothing
+    entity.hass = co.hass
+    entity.states = []
+    entity.async_write_ha_state = lambda: entity.states.append(entity.is_on)
+    return entity
+
+
 @pytest.mark.parametrize("on", [True, False])
 @pytest.mark.parametrize("key,wire_key,robot_type,cloud_type,iot", [
     ("child_lock", "childLock", int, str, True),
@@ -45,7 +89,9 @@ def make_coordinator():
     ("rain_sensor", "rainSensor", int, str, False),
     ("rain_detection", "rainDetectionSwitch", int, str, False),
 ])
-def test_switch_wire_types_and_one_refresh(on, key, wire_key, robot_type, cloud_type, iot):
+def test_switch_wire_types_and_one_refresh(
+    timers, on, key, wire_key, robot_type, cloud_type, iot
+):
     async def scenario():
         co = make_coordinator()
 
@@ -54,9 +100,7 @@ def test_switch_wire_types_and_one_refresh(on, key, wire_key, robot_type, cloud_
             return {"cmd_num": "private-command-id"}
 
         co.client.call = call
-        desc = next(d for d in SWITCHES if d.key == key)
-        entity = NavimowSwitch(co, desc)
-        entity.coordinator = co  # the lightweight HA base class stub stores nothing
+        entity = make_switch(co, key)
         await entity._write(on)
         assert len(co.calls) == 3
         device, cloud, refresh = co.calls
@@ -71,9 +115,79 @@ def test_switch_wire_types_and_one_refresh(on, key, wire_key, robot_type, cloud_
         assert cloud_value == (str(int(on)) if iot else f"0{int(on)}")
         assert cloud[1].get("operation_type") == ("iot_set" if iot else None)
         assert refresh == "refresh"
-        # A submitted command is not an observed state.
+        # A submitted command is not an observed state: once the hold runs out
+        # the switch shows what the mower reports.
         if key == "child_lock":
+            timers.fire()
             assert entity.is_on is False
+        await co.async_cancel_setting_checks()
+
+    asyncio.run(scenario())
+
+
+def test_switch_moves_at_once_and_holds_until_reported(timers):
+    async def scenario():
+        co = make_coordinator()
+        co.client.call = lambda path, data: co.calls.append(path) or {}
+        entity = make_switch(co, "child_lock")
+        await entity._write(True)
+        # Shown before anything was sent, kept while the cloud lags behind.
+        assert entity.states[0] is True
+        assert entity.is_on is True
+        assert timers.pending[0][0] == SETTING_CONFIRM_S
+        entity._handle_coordinator_update()
+        assert entity.is_on is True and timers.pending
+        co.data["settings"]["child_lock"] = True
+        entity._handle_coordinator_update()
+        assert entity._shown is None and not timers.pending
+        assert entity.is_on is True
+        await co.async_cancel_setting_checks()
+
+    asyncio.run(scenario())
+
+
+def test_never_reported_goes_back_to_what_the_mower_has(timers):
+    async def scenario():
+        co = make_coordinator()
+        co.client.call = lambda path, data: {}
+        entity = make_switch(co, "child_lock")
+        await entity._write(True)
+        timers.fire()
+        assert entity.is_on is False
+        assert entity.states[-1] is False
+        await co.async_cancel_setting_checks()
+
+    asyncio.run(scenario())
+
+
+def test_refused_write_puts_the_switch_back(timers):
+    async def scenario():
+        co = make_coordinator()
+
+        def call(path, data):
+            raise NavimowError("test", "request failed")
+
+        co.client.call = call
+        entity = make_switch(co, "child_lock")
+        with pytest.raises(NavimowError):
+            await entity._write(True)
+        assert entity.states == [True, False]
+        assert entity._shown is None and not timers.pending
+        await co.async_cancel_setting_checks()
+
+    asyncio.run(scenario())
+
+
+def test_write_only_switch_keeps_the_commanded_value(timers):
+    async def scenario():
+        co = make_coordinator()
+        co.client.call = lambda path, data: {}
+        desc = next(d for d in SWITCHES if d.assumed)
+        entity = make_switch(co, desc.key)
+        assert entity._attr_assumed_state
+        await entity._write(True)
+        assert entity._shown is None and not timers.pending
+        assert entity.is_on is True
         await co.async_cancel_setting_checks()
 
     asyncio.run(scenario())

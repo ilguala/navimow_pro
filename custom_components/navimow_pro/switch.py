@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.switch import (
@@ -24,10 +25,11 @@ from homeassistant.components.switch import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 
-from .const import DOMAIN
+from .const import DOMAIN, SETTING_CONFIRM_S
 from .coordinator import NavimowCoordinator
 from .entity import NavimowEntity
 
@@ -346,9 +348,16 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
         self._readable = description.value_fn(settings) is not None
         self._attr_assumed_state = description.assumed and not self._readable
         self._optimistic: bool | None = None
+        # The value just switched to, shown until the mower reports it or
+        # SETTING_CONFIRM_S pass. The write and the refresh after it take a few
+        # seconds, so the switch lagged behind the click (#31).
+        self._shown: bool | None = None
+        self._unsub_shown = None
 
     @property
     def is_on(self) -> bool | None:
+        if self._shown is not None:
+            return self._shown
         value = self.entity_description.value_fn(self.data.get("settings") or {})
         if value is None and self._attr_assumed_state:
             return self._optimistic
@@ -383,10 +392,51 @@ class NavimowSwitch(NavimowEntity, SwitchEntity):
                 desc.write_key,
                 on,
             ))
-        await self.coordinator.async_write_setting(desc.key, on, operations)
-        if self._attr_assumed_state:
-            self._optimistic = on
+        self._show(on)
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_write_setting(desc.key, on, operations)
+        except Exception:
+            # Refused: the switch goes back to what the mower has.
+            self._drop_shown()
             self.async_write_ha_state()
+            raise
+        if self._attr_assumed_state:
+            # Never reported back, so the commanded value is all there is.
+            self._optimistic = on
+            self._drop_shown()
+            self.async_write_ha_state()
+
+    def _show(self, on: bool) -> None:
+        self._drop_shown()
+        self._shown = on
+        self._unsub_shown = async_call_later(
+            self.hass, SETTING_CONFIRM_S, self._async_shown_expired
+        )
+
+    def _drop_shown(self) -> None:
+        self._shown = None
+        if self._unsub_shown is not None:
+            self._unsub_shown()
+            self._unsub_shown = None
+
+    @callback
+    def _async_shown_expired(self, _now: datetime) -> None:
+        """Never reported: show what the mower has again."""
+        self._unsub_shown = None
+        self._shown = None
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        current = self.entity_description.value_fn(self.data.get("settings") or {})
+        if self._shown is not None and current == self._shown:
+            self._drop_shown()
+        super()._handle_coordinator_update()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._drop_shown()
+        await super().async_will_remove_from_hass()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._write(True)

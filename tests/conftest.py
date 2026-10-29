@@ -74,6 +74,7 @@ if importlib.util.find_spec("homeassistant") is None:
         "homeassistant.helpers",
         "homeassistant.helpers.device_registry",
         "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.event",
         "homeassistant.helpers.storage",
         "homeassistant.helpers.update_coordinator",
         "homeassistant.util",
