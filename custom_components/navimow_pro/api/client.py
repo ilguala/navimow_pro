@@ -501,9 +501,9 @@ class NavimowCloudClient:
     def firmware(self, sn: str, vehicle_type: Any) -> dict:
         """What the cloud says about the mower's firmware (read-only; #33).
 
-        Neither path has a recorded answer yet, so each is asked on its own and
-        whatever comes back -- data or an error code -- is kept, for the
-        diagnostics dump to show. Nothing here starts an update.
+        Each path is asked on its own and whatever comes back -- data or an
+        error code -- is kept, for the diagnostics dump to show. Nothing here
+        starts an update.
         """
         out: dict[str, Any] = {}
         for key, path in (
@@ -517,6 +517,13 @@ class NavimowCloudClient:
             except NavimowError as err:
                 out[key] = {"error": str(err)}
         return out
+
+    def firmware_list(self, sn: str, vehicle_type: Any) -> Any:
+        """The version of each firmware module on the mower (read-only; #33)."""
+        return self.call(
+            "/mowerbot/vehicle/firmware/get-firmware-list",
+            {"vehicle_sn": sn, "vehicle_type": vehicle_type},
+        )
 
     def map_list(self, sn: str) -> Any:
         return self.call("/map/index/map-list", {"vehicle_sn": sn})

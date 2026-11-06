@@ -17,6 +17,8 @@ These back the graphical cards (and automations).
 """
 from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -157,6 +159,19 @@ def _hhmm_to_min(value: str) -> int:
     return h * 60 + m
 
 
+def _device_entry_ids(device: Any) -> set[str]:
+    """The config entries a device belongs to.
+
+    Home Assistant 2026.11 gives a device a single ``config_entry_id`` and
+    deprecates ``config_entries``, which stops working in 2027.10 (#33); older
+    versions only have the set.
+    """
+    entry_id = getattr(device, "config_entry_id", None)
+    if entry_id:
+        return {entry_id}
+    return set(device.config_entries)
+
+
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register integration services once."""
     if hass.services.has_service(DOMAIN, SERVICE_MOW):
@@ -169,7 +184,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if device_id:
             device = dr.async_get(hass).async_get(device_id)
             if device:
-                for entry_id in device.config_entries:
+                for entry_id in _device_entry_ids(device):
                     if entry_id in store:
                         return store[entry_id]
             raise ServiceValidationError("device_id is not a Navimow (Private) mower")

@@ -20,6 +20,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -102,6 +103,12 @@ _TRAIL_STORE_VERSION = 1
 # One file now holds a trail per zone, so it is written less often while cutting.
 _TRAIL_SAVE_DELAY = 60
 
+# Firmware version for the device page (#33): read at startup, then twice a
+# day; after a failed read, again in half an hour.
+_FIRMWARE_REFRESH_S = 12 * 3600
+_FIRMWARE_RETRY_S = 1800
+_FIRMWARE_WIRE = re.compile(r"0[0-9A-Fa-f]{3}")
+
 
 def trail_store(hass: HomeAssistant, entry_id: str) -> Store:
     """Per-entry Store that persists the reconstructed mowed trail.
@@ -146,6 +153,24 @@ def signal_idle(own: int | None, other: int | None) -> bool:
     Both at 0 stays a 0: that one is worth seeing.
     """
     return own == 0 and (other or 0) > 0
+
+
+def firmware_version(payload: Any) -> str | None:
+    """The main firmware version as the app writes it (get-firmware-list, #33).
+
+    Each module comes as ``{"type", "version"}``, four characters on the wire,
+    and the app shows "1." and then the last three, dot-separated: on an X450,
+    ``sw`` (the app's "ACU firmware") ``005D`` reads 1.0.5.D. Only that shape is
+    rewritten; a version in any other shape is shown as it came.
+    """
+    modules = _find(payload, "firmwareList")
+    for item in modules if isinstance(modules, list) else []:
+        if isinstance(item, dict) and str(item.get("type") or "").lower() == "sw":
+            wire = str(item.get("version") or "").strip()
+            if _FIRMWARE_WIRE.fullmatch(wire):
+                return "1." + ".".join(wire[1:])
+            return wire or None
+    return None
 
 
 def _as_float(value: Any) -> float | None:
@@ -1112,6 +1137,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         # start_mowing reads it. Empty list = all zones. In-memory (resets on
         # restart to "all").
         self.selected_zone_ids: list[int] = []
+        # Firmware version for the device page (#33): when to read it next, the
+        # version last read, and the one last written to the device registry.
+        self._firmware_next = 0.0
+        self.sw_version: str | None = None
+        self._sw_version_applied: str | None = None
 
     def _hold_error(
         self, has_error: bool, text: str | None, codes: list[str]
@@ -1250,6 +1280,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                     )
             except Exception:  # noqa: BLE001 - persistence must not break polling
                 _LOGGER.debug("trail: save failed", exc_info=True)
+        self._sync_sw_version()
         self.update_interval = timedelta(seconds=self._poll_interval(snapshot))
         return snapshot
 
@@ -1316,6 +1347,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 raise
             except NavimowError:
                 raw["device_info"] = {}
+
+        self._maybe_fetch_firmware()
 
         # Which group this cycle fetches. Decided up front because auth-list
         # below only wants refreshing on a slow one.
@@ -1424,6 +1457,45 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # id/edit-time so the 2 KB blob is only downloaded when it changes.
             self._maybe_fetch_map(raw)
         return self._parse(raw)
+
+    def _maybe_fetch_firmware(self) -> None:
+        """Read the firmware version at startup, then twice a day (#33)."""
+        now = time.monotonic()
+        if now < self._firmware_next:
+            return
+        try:
+            version = firmware_version(
+                self.client.firmware_list(self.sn, self.vehicle_type)
+            )
+        except NavimowAuthError:
+            raise
+        except NavimowError:
+            self._firmware_next = now + _FIRMWARE_RETRY_S
+            return
+        self._firmware_next = now + _FIRMWARE_REFRESH_S
+        if version:
+            self.sw_version = version
+
+    def _sync_sw_version(self) -> None:
+        """Put a firmware version read after startup on the device page.
+
+        Entities hand over their device info only when they are added, so a
+        version that turns up or changes later -- an update, or a first read
+        that failed -- has to be written to the device registry.
+        """
+        version = self.sw_version
+        if not version or version == self._sw_version_applied:
+            return
+        try:
+            registry = dr.async_get(self.hass)
+            device = registry.async_get_device(identifiers={(DOMAIN, self.sn)})
+            if device is None:
+                return  # not registered yet: the entities' device info carries it
+            if device.sw_version != version:
+                registry.async_update_device(device.id, sw_version=version)
+            self._sw_version_applied = version
+        except Exception:  # noqa: BLE001 - the device page must not break a poll
+            _LOGGER.debug("firmware: device registry update failed", exc_info=True)
 
     def _maybe_fetch_path(self, raw: dict, state_code: str) -> None:
         """Read the mower's own path when it is worth it (beta).

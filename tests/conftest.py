@@ -72,6 +72,7 @@ if importlib.util.find_spec("homeassistant") is None:
         "homeassistant.core",
         "homeassistant.exceptions",
         "homeassistant.helpers",
+        "homeassistant.helpers.config_validation",
         "homeassistant.helpers.device_registry",
         "homeassistant.helpers.entity_platform",
         "homeassistant.helpers.event",
@@ -81,6 +82,15 @@ if importlib.util.find_spec("homeassistant") is None:
         "homeassistant.util.dt",
     ):
         sys.modules[name] = _placeholder_module(name)
+        # "from homeassistant.helpers import device_registry" must find the
+        # module, not a placeholder class standing in for an attribute.
+        parent, _, child = name.rpartition(".")
+        if parent:
+            setattr(sys.modules[parent], child, sys.modules[name])
+    # services.py builds its schemas with voluptuous, which ships with Home
+    # Assistant; a placeholder lets its lookups be tested without either.
+    if importlib.util.find_spec("voluptuous") is None:
+        sys.modules["voluptuous"] = _placeholder_module("voluptuous")
 
     @dataclass(frozen=True, kw_only=True)
     class SwitchEntityDescription:

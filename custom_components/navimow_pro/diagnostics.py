@@ -30,7 +30,8 @@ from .coordinator import NavimowCoordinator
 # Anything that identifies the account, the session or the machine. Kept
 # deliberately wide: these dumps are meant to be pasted into public issues.
 # Exact key names to hide. Kept alongside the word-based rule below because a
-# couple of them ("sn", "device_id") are too short or too generic to match on.
+# few of them ("sn", "pn", "device_id") are too short or too generic to match
+# on. "pn" sits on a firmware module and may be a part or serial number (#33).
 TO_REDACT = {
     "access_token",
     "auth_uid",
@@ -39,6 +40,7 @@ TO_REDACT = {
     "latitude",
     "longitude",
     "password",
+    "pn",
     "refresh_token",
     "serial",
     "sn",

@@ -22,7 +22,8 @@ developer programme.
 
 ## Features
 
-All entities live under a single Home Assistant device (the mower).
+All entities live under a single Home Assistant device (the mower). Its page
+shows the main firmware version as the app writes it, for example 1.0.5.D.
 
 | Platform | Entity | Notes |
 |---|---|---|
@@ -325,6 +326,10 @@ unavailable or reads `unknown` rather than the integration crashing:
   is not using reads 0. That sensor shows as unavailable while the other link
   carries a signal; both at 0 is shown as 0. The 4G sensor exists only on
   mowers whose cloud reports a 4G reading.
+- **Firmware version.** The device page shows the main firmware only (the app's
+  ACU firmware). It is read at startup and then every 12 hours, so after an
+  update it can lag until the next read or a restart. The other modules are in
+  the diagnostics download.
 
 ---
 

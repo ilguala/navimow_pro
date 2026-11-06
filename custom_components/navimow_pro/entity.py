@@ -30,13 +30,17 @@ class NavimowEntity(CoordinatorEntity[NavimowCoordinator]):
     @property
     def device_info(self) -> DeviceInfo:
         data = self.data
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self._sn)},
             manufacturer=MANUFACTURER,
             name=data.get("name") or "Navimow",
             model=data.get("model") or None,
             serial_number=self._sn,
         )
+        # Only once known: None would blank a version the device page shows.
+        if self.coordinator.sw_version:
+            info["sw_version"] = self.coordinator.sw_version
+        return info
 
     @property
     def available(self) -> bool:
