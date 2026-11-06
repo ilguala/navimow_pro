@@ -106,6 +106,9 @@
       "signal_wifi": {
         "name": "Segnale Wi-Fi"
       },
+      "signal_4g": {
+        "name": "Segnale 4G"
+      },
       "position_x": {
         "name": "Posizione X"
       },

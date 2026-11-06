@@ -100,6 +100,17 @@ _VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("MAC", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")),
     ("IPV4", re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
                         r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b")),
+    # A pre-signed download link (a firmware package, say) carries a short-lived
+    # credential in its query string. Only the query goes: the host and path
+    # show where a file lives, which is the useful part.
+    (
+        "SIGNED_URL",
+        re.compile(
+            r"(?<=\?)[^\s\"'<>]*(?:Signature|Credential|AccessKeyId|Security-Token)="
+            r"[^\s\"'<>]*",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 # A firmware version reads exactly like an IPv4 address ("1.12.3.40"), and the
@@ -218,6 +229,20 @@ def _trim(value: Any, depth: int = 0) -> Any:
     return value
 
 
+async def _read_firmware(hass: HomeAssistant, coordinator: NavimowCoordinator) -> Any:
+    """The cloud's firmware answers (#33), asked here and nowhere else.
+
+    Only a diagnostics download asks, so the polling loop never pays for it,
+    and a probe that fails must not cost the user the rest of the dump.
+    """
+    try:
+        return await hass.async_add_executor_job(
+            coordinator.client.firmware, coordinator.sn, coordinator.vehicle_type
+        )
+    except Exception as err:  # noqa: BLE001 -- see the docstring
+        return {"error": type(err).__name__}
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -225,6 +250,7 @@ async def async_get_config_entry_diagnostics(
     coordinator: NavimowCoordinator | None = (hass.data.get(DOMAIN) or {}).get(
         entry.entry_id
     )
+    firmware = None if coordinator is None else await _read_firmware(hass, coordinator)
 
     # One pass to learn the real secret strings, so the second pass can also
     # remove them where they are echoed under an innocent key.
@@ -233,6 +259,7 @@ async def async_get_config_entry_diagnostics(
     if coordinator is not None:
         _collect_secrets(coordinator.raw_payloads, secrets)
         _collect_secrets(coordinator.data or {}, secrets)
+        _collect_secrets(firmware, secrets)
     frozen = frozenset(secrets)
 
     data: dict[str, Any] = {
@@ -258,4 +285,5 @@ async def async_get_config_entry_diagnostics(
     snapshot = {k: v for k, v in (coordinator.data or {}).items() if k != "path_zones"}
     data["snapshot"] = _redact(_trim(snapshot), frozen)
     data["setting_writes"] = _redact(coordinator.setting_writes, frozen)
+    data["firmware"] = _redact(_trim(firmware), frozen)
     return data

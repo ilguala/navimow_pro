@@ -27,7 +27,7 @@ All entities live under a single Home Assistant device (the mower).
 | Platform | Entity | Notes |
 |---|---|---|
 | `lawn_mower` | Mower | Start / Pause / Dock. Start resumes a paused mow, and carries on with an unfinished job when the mower is docked and no zones are picked |
-| `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Last message, Wi-Fi signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
+| `sensor` | Battery, Status, Mowing progress, Coverage, Current zone, Session area, Area this week, Next mow, Error, Last message, Wi-Fi and 4G signal, Blades life, Chassis life, State code | Areas / progress are best-effort (see below) |
 | `binary_sensor` | Problem, Online, Docked | A fault is held briefly after the cloud stops reporting it, so the sensor does not flicker |
 | `number` | Cutting height, battery thresholds | Created only on mowers that report the setting; bounded by the values the machine accepts |
 | `calendar` | Mowing schedule | Read-only view of the weekly plan |
@@ -321,6 +321,10 @@ unavailable or reads `unknown` rather than the integration crashing:
 - **GPS position.** Whether the cloud reports a live fix or a fixed reference
   point is not something the integration can tell apart. If the marker never
   moves while the mower is cutting, that is the cloud, not the entity.
+- **Wi-Fi and 4G signal.** The cloud reports both links, and the one the mower
+  is not using reads 0. That sensor shows as unavailable while the other link
+  carries a signal; both at 0 is shown as 0. The 4G sensor exists only on
+  mowers whose cloud reports a 4G reading.
 
 ---
 

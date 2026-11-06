@@ -498,6 +498,26 @@ class NavimowCloudClient:
             "/vehicle/vehicle/get-component-maintenance", {"vehicle_sn": sn}
         ) or {}
 
+    def firmware(self, sn: str, vehicle_type: Any) -> dict:
+        """What the cloud says about the mower's firmware (read-only; #33).
+
+        Neither path has a recorded answer yet, so each is asked on its own and
+        whatever comes back -- data or an error code -- is kept, for the
+        diagnostics dump to show. Nothing here starts an update.
+        """
+        out: dict[str, Any] = {}
+        for key, path in (
+            ("new_firmware", "/vehicle/firmware/get-new-firmware"),
+            ("firmware_list", "/mowerbot/vehicle/firmware/get-firmware-list"),
+        ):
+            try:
+                out[key] = self.call(path, {"vehicle_sn": sn, "vehicle_type": vehicle_type})
+            except NavimowAuthError:
+                raise
+            except NavimowError as err:
+                out[key] = {"error": str(err)}
+        return out
+
     def map_list(self, sn: str) -> Any:
         return self.call("/map/index/map-list", {"vehicle_sn": sn})
 

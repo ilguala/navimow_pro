@@ -137,6 +137,17 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def signal_idle(own: int | None, other: int | None) -> bool:
+    """Whether a link's signal reading belongs to the link not in use (#33).
+
+    A mower on 4G reports its Wi-Fi signal as 0 the whole time, and a 0 reads
+    like a fault. When one link reads 0 while the other carries a signal, the
+    mower is simply using the other one, so the 0 says nothing about coverage.
+    Both at 0 stays a 0: that one is worth seeing.
+    """
+    return own == 0 and (other or 0) > 0
+
+
 def _as_float(value: Any) -> float | None:
     try:
         return float(value)

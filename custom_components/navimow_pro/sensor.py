@@ -19,7 +19,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import NavimowCoordinator
+from .coordinator import NavimowCoordinator, signal_idle
 from .entity import NavimowEntity
 
 
@@ -39,6 +39,9 @@ class NavimowSensorDescription(SensorEntityDescription):
     # Whether this mower gets the entity at all, decided once from the first
     # snapshot. None = always created.
     exists_fn: Callable[[dict], bool] | None = None
+    # Whether the reading means anything right now; the entity is unavailable
+    # when it does not. None = available whenever the mower is.
+    available_fn: Callable[[dict], bool] | None = None
 
 
 def _schedule_summary(schedule: list | None) -> str | None:
@@ -225,6 +228,18 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("signal_wifi"),
+        available_fn=lambda d: not signal_idle(d.get("signal_wifi"), d.get("signal_4g")),
+    ),
+    NavimowSensorDescription(
+        key="signal_4g",
+        translation_key="signal_4g",
+        icon="mdi:signal-cellular-3",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("signal_4g"),
+        available_fn=lambda d: not signal_idle(d.get("signal_4g"), d.get("signal_wifi")),
+        # Only on mowers whose cloud reports a 4G reading at all (#33).
+        exists_fn=lambda d: d.get("signal_4g") is not None,
     ),
     NavimowSensorDescription(
         key="position_x",
@@ -321,6 +336,13 @@ class NavimowSensor(NavimowEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, description.key)
         self.entity_description = description
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        available_fn = self.entity_description.available_fn
+        return available_fn is None or available_fn(self.data)
 
     @property
     def native_value(self) -> Any:
