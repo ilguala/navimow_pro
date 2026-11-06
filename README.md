@@ -7,8 +7,9 @@
 </p>
 
 Unofficial Home Assistant custom integration for **Segway Navimow** robot mowers
-(i- and H-series, and some X-series). It works with your own Navimow account,
-without the vendor's public Open API or developer programme.
+(i-, H- and X-series; on the X-series, users have confirmed the X3 and the X450).
+It works with your own Navimow account, without the vendor's public Open API or
+developer programme.
 
 > **Disclaimer.** This is an **unofficial**, community, interoperability project.
 > It is not affiliated with, endorsed by, or supported by Segway, Ninebot, or
@@ -163,6 +164,14 @@ There are no screenshots here: the ones that used to be were of a real garden.
 
 (Manual alternative: copy `custom_components/navimow_pro` into your Home
 Assistant `config/custom_components/` folder and restart.)
+
+### Coming from Navimow HA Pro
+
+Check templates that read entity attributes. One that catches people out: in
+the Schedule sensor's `days` attribute, each day's `weekday` is the short name
+(`Sun`, `Mon`, …), where Navimow HA Pro used the full one (`Sunday`). A
+template that matches on the name finds nothing and falls back silently. Match
+on `day` instead: 1 = Sunday … 7 = Saturday.
 
 ---
 
