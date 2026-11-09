@@ -27,6 +27,7 @@ from custom_components.navimow_pro.coordinator import (
     _decode_path_data,
     _parse_path_row,
     _path_runs,
+    _point_drawn,
 )
 
 
@@ -35,8 +36,8 @@ def row(zone, points, pct=40, start=1000):
             "endTime": start + 99, "points": points}
 
 
-def pt(x, y, kr="01"):
-    return {"x": x, "y": y, "kr": kr, "pid": "1", "pt": "04"}
+def pt(x, y, kr="01", kind="04"):
+    return {"x": x, "y": y, "kr": kr, "pid": "1", "pt": kind}
 
 
 def encode(rows):
@@ -58,10 +59,44 @@ def test_nothing_and_garbage_are_told_apart():
     assert _decode_path_data([row(1, [])]) == [row(1, [])]
 
 
-def test_kr_becomes_the_blade_flag():
-    parsed = _parse_path_row(row(4, [pt(1, 2, "01"), pt(2, 2, "00"), pt(3, 2, "")]))
-    assert parsed["points"] == [[1.0, 2.0, True], [2.0, 2.0, False], [3.0, 2.0, None]]
-    assert parsed["blade_off"] == 1 and parsed["zone"] == 4 and parsed["start"] == 1000
+@pytest.mark.parametrize(
+    ("kr", "kind", "drawn"),
+    [
+        ("00", "00", True),  # types 00 and 01 are drawn whatever the blade
+        ("00", "01", True),
+        ("01", "02", True),  # any other type with the blade turning
+        ("01", "04", True),
+        ("00", "02", False),  # ... and not with it stopped
+        ("00", "04", False),
+        ("01", "06", False),  # 06 always breaks the line
+        ("00", "06", False),
+        ("", "06", False),
+        ("01", "", True),
+        ("00", "", False),
+        ("", "04", False),
+        ("1", "04", False),  # exact strings, as the app compares them
+        ("", "", None),  # no flags at all: drawn, as before they were known
+    ],
+)
+def test_the_apps_rule_for_path_points(kr, kind, drawn):
+    assert _point_drawn(kr, kind) is drawn
+
+
+def test_the_flags_become_the_drawn_flag():
+    parsed = _parse_path_row(row(4, [
+        pt(1, 2, "01"), pt(2, 2, "00"), pt(3, 2, "00", "00"), pt(4, 2, "01", "06"),
+        {"x": 5, "y": 2},
+    ]))
+    assert [p[2] for p in parsed["points"]] == [True, False, True, False, None]
+    assert parsed["blade_off"] == 2 and parsed["left_out"] == 2
+    assert parsed["zone"] == 4 and parsed["start"] == 1000
+
+
+def test_vahesoos_six_point_sequence():
+    # pt/kr: 00/00, 02/00, 02/00, 01/00, 06/01, 02/01 -> the app draws [0], [3], [5].
+    flags = [("00", "00"), ("00", "02"), ("00", "02"), ("00", "01"), ("01", "06"), ("01", "02")]
+    parsed = _parse_path_row(row(1, [pt(i, 0, kr, kind) for i, (kr, kind) in enumerate(flags)]))
+    assert _path_runs(parsed["points"], True, [])["path"] == [[[0, 0]], [[3, 0]], [[5, 0]]]
 
 
 def test_a_row_without_a_zone_is_dropped():
@@ -72,7 +107,7 @@ def test_thinning_keeps_where_the_blade_changes():
     many = [pt(i * 0.01, 0, "00" if i == 12345 else "01") for i in range(3 * TRAIL_MAX_POINTS)]
     parsed = _parse_path_row(row(1, many))
     assert len(parsed["points"]) <= TRAIL_MAX_POINTS + 50
-    assert parsed["blade_off"] == 1
+    assert parsed["blade_off"] == 1 and parsed["left_out"] == 1
 
 
 # ---------------------------------------------------------------- summary
@@ -93,6 +128,8 @@ def test_the_summary_tells_what_the_path_is_made_of():
     assert summary["point_fields"] == ["kr", "pid", "pt", "timestamp", "x", "y"]
     assert summary["pid"] == {"1": 2, "2": 2} and summary["pid_changes"] == 1
     assert summary["pt"] == {"04": 3, "00": 1}
+    assert summary["kr_pt"] == {"01/04": 3, "01/00": 1}
+    assert summary["spacing_m"] == {"median": 0.25, "max": 0.5, "over_2": 0}
     assert summary["pid_times"] == {"1": [500.0, 500.0], "2": [700.0, 900.0]}
     # Not a single coordinate.
     assert not any(c in str(summary) for c in ("1.25", "1.75", "2.25", "2.75"))
@@ -105,6 +142,13 @@ def test_the_summary_without_times_and_with_many_values():
     assert len(summary["pid"]) == _PATH_SUMMARY_VALUES + 1
     assert summary["pid"]["<more>"] == 5
     assert summary["pid_changes"] == _PATH_SUMMARY_VALUES + 4
+    assert summary["spacing_m"] == {"median": 1.0, "max": 1.0, "over_2": 0}
+
+
+def test_the_summary_counts_long_steps():
+    summary = _parse_path_row(row(1, [pt(0, 0), pt(0, 1), pt(0, 5), pt(0, 13)]))["summary"]
+    assert summary["spacing_m"] == {"median": 4.0, "max": 8.0, "over_2": 2}
+    assert "spacing_m" not in _parse_path_row(row(1, [pt(0, 0)]))["summary"]
 
 
 # ---------------------------------------------------------------- stretches
@@ -113,22 +157,22 @@ def test_the_summary_without_times_and_with_many_values():
 POINTS = [[0, 0, True], [1, 0, True], [2, 0, False], [3, 0, True], [4, 0, True]]
 
 
-def test_a_stopped_blade_breaks_the_stretch():
-    assert _path_runs(POINTS, True, []) == [[[0, 0], [1, 0]], [[3, 0], [4, 0]]]
+def test_a_point_left_out_breaks_the_stretch():
+    assert _path_runs(POINTS, True, []) == {"path": [[[0, 0], [1, 0]], [[3, 0], [4, 0]]], "tail": []}
 
 
 def test_without_blade_gaps_it_is_one_stretch():
-    assert _path_runs(POINTS, False, []) == [[[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]]
+    assert _path_runs(POINTS, False, [])["path"] == [[[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]]
 
 
 def test_the_live_tail_joins_the_path():
     runs = _path_runs(POINTS, True, [[5, 0], [6, 0]])
-    assert runs[-1] == [[4, 0], [5, 0], [6, 0]]
+    assert runs["tail"] == [[4, 0], [5, 0], [6, 0]]
 
 
-def test_a_tail_after_a_stopped_blade_is_not_joined():
+def test_a_tail_after_a_point_left_out_is_not_joined():
     runs = _path_runs([[0, 0, True], [1, 0, False]], True, [[2, 0]])
-    assert runs[-1] == [[2, 0]]
+    assert runs["tail"] == [[2, 0]]
 
 
 # ---------------------------------------------------------------- when
@@ -288,9 +332,30 @@ def test_the_mowers_path_replaces_the_rebuilt_trail_for_its_zone():
         "map": {"zones": [zone(1, 0, 10), zone(2, 20, 30)]},
         "trail_zones": {1: own, 2: [[21 + i * 0.5, 8.0] for i in range(10)]},
         "trail": own,
-        "path_zones": {2: [[[21, 2], [22, 2], [23, 2]], [[25, 2], [26, 2], [27, 2]]]},
+        "path_zones": {2: {"path": [[[21, 2], [22, 2], [23, 2]], [[25, 2], [26, 2], [27, 2]]],
+                           "tail": []}},
     }
     drawn = lines(render(data))
     assert len(drawn) == 3  # zone 1's own trail + zone 2's two stretches
     with_path = render(dict(data, path_zones={}))
     assert len(lines(with_path)) == 2  # without it, both zones' own trails
+
+
+def stripes(x0, y0):
+    """Long passes with points only where the mower turns, 4 m apart."""
+    return [[x0 + (4 if i % 4 in (1, 2) else 0), y0 + 0.3 * (i // 2)] for i in range(12)]
+
+
+def test_the_mowers_path_is_not_split_where_its_points_lie_apart():
+    data = {
+        "state": "Docked", "battery": 80,
+        "coverage": {"zones": [{"id": 1, "pct": 60}, {"id": 2, "pct": 60}]},
+        "map": {"zones": [zone(1, 0, 10), zone(2, 20, 30)]},
+        "trail_zones": {1: stripes(2, 2)},
+        "path_zones": {2: {"path": [stripes(22, 2)], "tail": [[22, 6], [26, 6], [26.5, 6]]}},
+    }
+    drawn = [len(run.split()) for run in lines(render(data))]
+    # Our own samples (zone 1) break at every 4 m jump, leaving five short
+    # pieces; zone 2's path is one line through all twelve points; its tail,
+    # our samples again, breaks too.
+    assert drawn == [2, 2, 2, 2, 2, 12, 2]

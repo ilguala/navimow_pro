@@ -283,14 +283,19 @@ class NavimowMapCamera(NavimowEntity, Camera):
         # One trail per zone when the coordinator keeps them so, else the whole
         # lawn as one (no zone to know it by).
         trail_zones = data.get("trail_zones")
-        runs = list(trail_zones.items()) if isinstance(trail_zones, dict) else [(None, trail)]
+        own = list(trail_zones.items()) if isinstance(trail_zones, dict) else [(None, trail)]
         # Where the mower's own path is known (beta) it replaces the trail rebuilt
-        # here for that zone: one entry per stretch drawn, the live tail included.
+        # here for that zone: one entry per stretch drawn, then the live tail.
+        # Each run says whether it is our own samples (True): only those are
+        # split where they jump and smoothed. The mower's path is drawn as it
+        # is, like the app: on long straight passes its points can lie metres
+        # apart, and splitting there left a zone's middle blank (#15).
         path_zones = data.get("path_zones") or {}
-        if path_zones:
-            runs = [(z, p) for z, p in runs if z not in path_zones] + [
-                (z, run) for z, zone_runs in path_zones.items() for run in zone_runs
-            ]
+        runs: list[tuple[int | None, list, bool]] = [(z, p, True) for z, p in own if z not in path_zones]
+        for z, zone_path in path_zones.items():
+            runs += [(z, run, False) for run in zone_path.get("path") or []]
+            if zone_path.get("tail"):
+                runs.append((z, zone_path["tail"], True))
 
         # Bounding box: derive it from the STABLE geometry (zones/off-limit/
         # VisionFence-off/channels/dock) first, then include only the dynamic points (mower +
@@ -403,14 +408,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
             if z.get("id") in finished and len(poly) >= 3:
                 pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
                 trail_parts.append(f'<polygon points="{pts_str}" fill="{_TRAIL_COLOR}"/>')
-        if any(len(pts) >= 2 for zid, pts in runs if zid not in finished):
+        if any(len(pts) >= 2 for zid, pts, _ in runs if zid not in finished):
             swath = self.data.get("swath_width_m") or SWATH_WIDTH_M
             stroke_w = min(max(swath * _TRAIL_WIDEN * scale, 6.0), 32.0)
             break_sq = TRAIL_BREAK_M * TRAIL_BREAK_M
             # Samples closer than 1.5 px on screen add nothing but size: with a
             # trail per zone the map can hold several times the points it did.
             step_sq = (1.5 / scale) ** 2
-            for zid, pts in runs:
+            for zid, pts, sampled in runs:
                 if zid in finished:
                     continue
                 segments: list[list[list[float]]] = [[]]
@@ -419,14 +424,15 @@ class NavimowMapCamera(NavimowEntity, Camera):
                     if prev is not None:
                         dx, dy = x - prev[0], y - prev[1]
                         gap = dx * dx + dy * dy
-                        if gap > break_sq:
+                        if sampled and gap > break_sq:
                             segments.append([])
                         elif gap < step_sq:
                             continue
                     segments[-1].append([x, y])
                     prev = [x, y]
                 for seg in segments:
-                    seg = self._smooth(seg)
+                    if sampled:
+                        seg = self._smooth(seg)
                     if len(seg) >= 2:
                         pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in seg)
                         trail_parts.append(

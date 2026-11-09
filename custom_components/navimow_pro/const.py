@@ -166,7 +166,7 @@ TRAIL_MAX_POINTS: Final = 10000
 # starting that zone over -- and the end of its trail. Smaller dips are noise.
 ZONE_RESET_DROP: Final = 10
 TRAIL_MIN_STEP_M: Final = 0.12  # drop position jitter: ignore steps smaller than this
-TRAIL_BREAK_M: Final = 2.0  # split the drawn trail where consecutive samples jump farther
+TRAIL_BREAK_M: Final = 2.0  # split our own trail where consecutive samples jump farther
 
 # --- vehicle_state (empirical hex from index2 / auth-list; see README_POC) --
 STATE_IDLE_DOCKED: Final = "0101"

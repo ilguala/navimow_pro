@@ -301,13 +301,12 @@ unavailable or reads `unknown` rather than the integration crashing:
   saying so -- but the command may still be carried out, so keep clear of the
   mower until it has visibly stopped or docked. Resume is sent without waiting.
 - **The mower's own path (beta).** Where the mower reports the path it actually
-  drove, the map draws that instead of the trail rebuilt from position samples,
-  leaving out the stretches where the blade was stopped. Both can be turned off
-  in *Configure*. The blade flag matches where the mower drives without cutting,
-  though it is not confirmed on the blade itself; if the map shows gaps where
-  the mower did cut, turn off "Leave out where the blade was stopped". A zone
-  mowed over several days, with breaks, can show only part of its path; the
-  diagnostics download lists what the path is made of, to work out why (#15).
+  drove, the map draws that instead of the trail rebuilt from position samples.
+  Each point carries a path type and a blade flag, and the map leaves out the
+  points the app leaves out, by the app's own rule (worked out by @vahesoo).
+  Both can be turned off in *Configure*; if the map shows gaps where the mower
+  did cut, turn off "Leave out what the app leaves out". The diagnostics
+  download lists what each zone's path is made of (#15).
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or

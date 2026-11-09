@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -858,14 +859,35 @@ def _value_counts(values: list) -> dict[str, int]:
     return out
 
 
+def _point_drawn(kr: str, pt: str) -> bool | None:
+    """Whether the app draws a point of the mower's path, from its two flags.
+
+    The app's rule, worked out by vahesoo: path type ``pt`` "06" always breaks
+    the line; types "00" and "01" are drawn whatever the blade did; any other
+    type only with the blade turning (``kr`` "01"). None for a point with
+    neither flag, drawn as before the flags were known.
+    """
+    if pt == "06":
+        return False
+    if pt in ("00", "01") or kr == "01":
+        return True
+    if kr == "00" or pt:
+        return False
+    return None
+
+
+def _flag(value: Any) -> str:
+    return str(value if value is not None else "").strip()
+
+
 def _path_summary(row: dict, points: list[dict]) -> dict:
     """What one zone's path is made of, for diagnostics: no coordinates (#15).
 
     A zone mowed over three days with breaks came back as its edge and an
-    empty middle, while the app showed it all but cut. Whether the cloud keeps
-    only the stretch after the last resume can be read only from the answer:
-    the row's own fields, the point fields ``pid`` and ``pt`` (meaning not
-    known yet), how often ``pid`` changes along the path, and any point times.
+    empty middle, while the app showed it all but cut. What the answer holds:
+    the row's own fields, the point flags ``pid``, ``pt`` and ``kr`` (with the
+    ``kr``/``pt`` pairs), how often ``pid`` changes along the path, any point
+    times, and how far apart consecutive points are.
     """
     pids = [p.get("pid") for p in points]
     summary: dict[str, Any] = {
@@ -881,7 +903,17 @@ def _path_summary(row: dict, points: list[dict]) -> dict:
         "pid": _value_counts(pids),
         "pid_changes": sum(1 for a, b in zip(pids, pids[1:]) if a != b),
         "pt": _value_counts([p.get("pt") for p in points]),
+        "kr_pt": _value_counts([f"{_flag(p.get('kr'))}/{_flag(p.get('pt'))}" for p in points]),
     }
+    xy = [(_as_float(p.get("x")), _as_float(p.get("y"))) for p in points]
+    xy = [(x, y) for x, y in xy if x is not None and y is not None]
+    steps = sorted(math.dist(a, b) for a, b in zip(xy, xy[1:]))
+    if steps:
+        summary["spacing_m"] = {
+            "median": round(steps[len(steps) // 2], 2),
+            "max": round(steps[-1], 2),
+            "over_2": sum(1 for s in steps if s > 2.0),
+        }
     times: dict[str, list[float]] = {}
     for p in points:
         stamp = _as_float(p.get("timestamp"))
@@ -894,12 +926,13 @@ def _path_summary(row: dict, points: list[dict]) -> dict:
 
 
 def _parse_path_row(row: dict) -> dict | None:
-    """One zone of the mower's path: ``{zone, start, pct, points, blade_off, summary}``.
+    """One zone of the mower's path: ``{zone, start, pct, points, blade_off, left_out, summary}``.
 
-    ``points`` are ``[x, y, cut]``, ``cut`` True for kr "01", False for "00",
-    None when the field is missing or something else. Thinned to
-    TRAIL_MAX_POINTS by stride, keeping every point where ``cut`` changes so a
-    stretch with the blade stopped is not thinned away.
+    ``points`` are ``[x, y, cut]``, ``cut`` whether the app draws the point
+    (see _point_drawn). Thinned to TRAIL_MAX_POINTS by stride, keeping every
+    point where ``cut`` changes so a stretch left out is not thinned away.
+    ``blade_off`` counts the points with kr "00", ``left_out`` those the app
+    does not draw.
     """
     zid = _as_int(row.get("partitionId"))
     if not zid or zid <= 0:
@@ -910,8 +943,9 @@ def _parse_path_row(row: dict) -> dict | None:
         x, y = _as_float(p.get("x")), _as_float(p.get("y"))
         if x is None or y is None:
             continue
-        kr = str(p.get("kr") or "").strip()
-        points.append([round(x, 2), round(y, 2), True if kr == "01" else False if kr == "00" else None])
+        cut = _point_drawn(_flag(p.get("kr")), _flag(p.get("pt")))
+        points.append([round(x, 2), round(y, 2), cut])
+    left_out = sum(1 for p in points if p[2] is False)
     if len(points) > TRAIL_MAX_POINTS:
         stride = -(-len(points) // TRAIL_MAX_POINTS)
         points = [
@@ -923,17 +957,20 @@ def _parse_path_row(row: dict) -> dict | None:
         "start": _as_int(row.get("startTime")),
         "pct": _as_int(row.get("partitionPercentage")),
         "points": points,
-        "blade_off": sum(1 for p in points if p[2] is False),
+        "blade_off": sum(1 for p in raw_points if _flag(p.get("kr")) == "00"),
+        "left_out": left_out,
         "summary": _path_summary(row, raw_points),
     }
 
 
-def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) -> list:
-    """Stretches to draw for one zone: the mower's path, then our live tail.
+def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) -> dict:
+    """What to draw for one zone: ``{"path": [stretch, ...], "tail": stretch}``.
 
-    With ``blade_gaps`` a point where the blade was stopped breaks the stretch
-    and is not drawn. The tail -- our own samples since the path was read -- is
-    joined to the path's last point so the two read as one line.
+    With ``blade_gaps`` a point the app does not draw breaks the stretch and
+    is not drawn either. The tail -- our own samples since the path was read --
+    is joined to the path's last point so the two read as one line. It is kept
+    apart because only our samples are split where they jump: the mower's path
+    is drawn as it is, as the app does, however far apart its points are.
     """
     runs: list[list[list[float]]] = [[]]
     for x, y, cut in points:
@@ -943,10 +980,11 @@ def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) ->
             continue
         runs[-1].append([x, y])
     runs = [run for run in runs if run]
+    joined: list[list[float]] = []
     if tail:
         start = [runs[-1][-1]] if runs and points and not (blade_gaps and points[-1][2] is False) else []
-        runs.append(start + [list(p) for p in tail])
-    return runs
+        joined = start + [list(p) for p in tail]
+    return {"path": runs, "tail": joined}
 
 
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
@@ -1629,6 +1667,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 zones[zid] = {
                     "points": len(path["points"]),
                     "blade_off": path["blade_off"],
+                    "left_out": path.get("left_out"),
                     "tail": len(tail),
                     "summary": path.get("summary"),
                 }

@@ -58,7 +58,7 @@
           "zones": "Zones (id:nom,...)",
           "mower_scale": "Taille de la tondeuse sur la carte",
           "mower_path": "Tracer le parcours de la tondeuse (bêta)",
-          "blade_gaps": "Exclure les passages lame arrêtée (bêta)"
+          "blade_gaps": "Exclure les passages que l'app ne dessine pas (bêta)"
         }
       }
     }

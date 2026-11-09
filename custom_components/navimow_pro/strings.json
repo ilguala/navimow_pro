@@ -58,7 +58,7 @@
           "zones": "Zones (id:name,...)",
           "mower_scale": "Mower size on the map",
           "mower_path": "Draw the mower's own path (beta)",
-          "blade_gaps": "Leave out where the blade was stopped (beta)"
+          "blade_gaps": "Leave out what the app leaves out (beta)"
         }
       }
     }

@@ -58,7 +58,7 @@
           "zones": "Zone (id:nome,...)",
           "mower_scale": "Dimensione del rasaerba sulla mappa",
           "mower_path": "Disegna il percorso del robot (beta)",
-          "blade_gaps": "Escludi i tratti con la lama ferma (beta)"
+          "blade_gaps": "Escludi i tratti che l'app non disegna (beta)"
         }
       }
     }
