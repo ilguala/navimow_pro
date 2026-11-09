@@ -283,7 +283,8 @@ async def async_get_config_entry_diagnostics(
     # Names and counts only, so it survives redaction and stays readable.
     data["map_inventory"] = coordinator.map_inventory or "map not decoded"
     data["raw"] = _redact(_trim(raw), frozen)
-    # Coordinates of the mower's own path stay out; path_status has the counts.
+    # Coordinates of the mower's own path stay out; path_status has the counts
+    # and, per zone, what the path is made of (#15).
     snapshot = {k: v for k, v in (coordinator.data or {}).items() if k != "path_zones"}
     data["snapshot"] = _redact(_trim(snapshot), frozen)
     data["setting_writes"] = _redact(coordinator.setting_writes, frozen)

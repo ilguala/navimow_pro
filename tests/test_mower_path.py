@@ -23,6 +23,7 @@ from custom_components.navimow_pro.const import (
     TRAIL_MAX_POINTS,
 )
 from custom_components.navimow_pro.coordinator import (
+    _PATH_SUMMARY_VALUES,
     _decode_path_data,
     _parse_path_row,
     _path_runs,
@@ -72,6 +73,38 @@ def test_thinning_keeps_where_the_blade_changes():
     parsed = _parse_path_row(row(1, many))
     assert len(parsed["points"]) <= TRAIL_MAX_POINTS + 50
     assert parsed["blade_off"] == 1
+
+
+# ---------------------------------------------------------------- summary
+
+
+def test_the_summary_tells_what_the_path_is_made_of():
+    points = [
+        dict(pt(1.25, 2.75), pid=1, pt="00", timestamp=500),
+        dict(pt(1.5, 2.75), pid=1, pt="04", timestamp=0),
+        dict(pt(1.75, 2.75), pid=2, pt="04", timestamp=900),
+        dict(pt(2.25, 2.75), pid=2, pt="04", timestamp=700),
+    ]
+    summary = _parse_path_row(dict(row(4, points), extra=[1]))["summary"]
+    assert summary["row"] == {"partitionId": 4, "partitionPercentage": 40,
+                              "startTime": 1000, "endTime": 1099}
+    assert summary["row_lists"] == ["extra"]
+    assert summary["points"] == 4
+    assert summary["point_fields"] == ["kr", "pid", "pt", "timestamp", "x", "y"]
+    assert summary["pid"] == {"1": 2, "2": 2} and summary["pid_changes"] == 1
+    assert summary["pt"] == {"04": 3, "00": 1}
+    assert summary["pid_times"] == {"1": [500.0, 500.0], "2": [700.0, 900.0]}
+    # Not a single coordinate.
+    assert not any(c in str(summary) for c in ("1.25", "1.75", "2.25", "2.75"))
+
+
+def test_the_summary_without_times_and_with_many_values():
+    points = [dict(pt(i, 0), pid=i) for i in range(_PATH_SUMMARY_VALUES + 5)]
+    summary = _parse_path_row(row(1, points))["summary"]
+    assert "pid_times" not in summary
+    assert len(summary["pid"]) == _PATH_SUMMARY_VALUES + 1
+    assert summary["pid"]["<more>"] == 5
+    assert summary["pid_changes"] == _PATH_SUMMARY_VALUES + 4
 
 
 # ---------------------------------------------------------------- stretches
@@ -164,6 +197,7 @@ def test_read_once_after_a_restart_for_zones_with_progress(mower):
     assert co.client.asked == [[4]]  # zone 7 is at 0 %
     assert snap["path_status"]["state"] == "ok"
     assert 4 in snap["path_zones"]
+    assert snap["path_status"]["zones"][4]["summary"]["pid"] == {"1": 2}
     co.poll()
     assert co.client.asked == [[4]]
 

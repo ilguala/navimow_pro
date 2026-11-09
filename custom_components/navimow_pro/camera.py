@@ -441,7 +441,12 @@ class NavimowMapCamera(NavimowEntity, Camera):
             # swath hanging over an edge it was following. The app draws
             # neither, and #15 read both as the mower leaving its boundaries.
             # With no zone geometry yet the trail is drawn as it is.
-            clip = ""
+            #
+            # Off-limit areas are cut out too, with a mask: they sit inside a
+            # zone, so the zone clip lets the swath along their edge spill in,
+            # and the app keeps them clear (#15).
+            attrs = ""
+            defs: list[str] = []
             zone_polys = [z.get("polygon") for z in zones if len(z.get("polygon") or []) >= 3]
             if zone_polys:
                 shapes = "".join(
@@ -449,10 +454,25 @@ class NavimowMapCamera(NavimowEntity, Camera):
                     % " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
                     for poly in zone_polys
                 )
-                parts.append(f'<defs><clipPath id="zones">{shapes}</clipPath></defs>')
-                clip = ' clip-path="url(#zones)"'
+                defs.append(f'<clipPath id="zones">{shapes}</clipPath>')
+                attrs += ' clip-path="url(#zones)"'
+            holes = "".join(
+                '<polygon points="%s" fill="black"/>'
+                % " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in ob)
+                for ob in obstacles
+                if len(ob) >= 3
+            )
+            if holes:
+                defs.append(
+                    f'<mask id="off_limit" maskUnits="userSpaceOnUse" x="0" y="0" '
+                    f'width="{_VIEW}" height="{_VIEW}">'
+                    f'<rect width="{_VIEW}" height="{_VIEW}" fill="white"/>{holes}</mask>'
+                )
+                attrs += ' mask="url(#off_limit)"'
+            if defs:
+                parts.append(f'<defs>{"".join(defs)}</defs>')
             parts.append(
-                f'<g opacity="{_TRAIL_OPACITY}"{clip}>{"".join(trail_parts)}</g>'
+                f'<g opacity="{_TRAIL_OPACITY}"{attrs}>{"".join(trail_parts)}</g>'
             )
 
         # Off-limit areas (the map's "obstacles"), outlined in the app's orange.

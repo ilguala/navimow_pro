@@ -144,8 +144,8 @@ colours them), the charging station, the mower's current
 position (on the dock while it is docked), and the mowed trail built up as it
 works. The trail is kept zone by zone, so a job that runs over several days keeps
 its first zones, and a zone's trail is cleared only when the mower starts that
-zone over. A finished zone is painted mowed edge to edge, as the app does. It all
-survives restarts.
+zone over. A finished zone is painted mowed edge to edge, as the app does, and
+off-limit areas are kept clear of the trail. It all survives restarts.
 
 Zone labels follow the app: a label is drawn only where it fits entirely inside
 its zone -- the name and percentage on a large zone, the percentage alone on a
@@ -305,7 +305,9 @@ unavailable or reads `unknown` rather than the integration crashing:
   leaving out the stretches where the blade was stopped. Both can be turned off
   in *Configure*. The blade flag matches where the mower drives without cutting,
   though it is not confirmed on the blade itself; if the map shows gaps where
-  the mower did cut, turn off "Leave out where the blade was stopped".
+  the mower did cut, turn off "Leave out where the blade was stopped". A zone
+  mowed over several days, with breaks, can show only part of its path; the
+  diagnostics download lists what the path is made of, to work out why (#15).
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or

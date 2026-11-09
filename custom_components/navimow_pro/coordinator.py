@@ -843,8 +843,58 @@ def _decode_path_data(payload: Any) -> list[dict] | None:
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
 
 
+_PATH_SUMMARY_VALUES = 20  # distinct pid / pt values a path summary lists
+
+
+def _value_counts(values: list) -> dict[str, int]:
+    """How many points carry each value, the commonest first, capped."""
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[str(value)] = counts.get(str(value), 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: -kv[1])
+    out = dict(ordered[:_PATH_SUMMARY_VALUES])
+    if len(ordered) > _PATH_SUMMARY_VALUES:
+        out["<more>"] = sum(n for _, n in ordered[_PATH_SUMMARY_VALUES:])
+    return out
+
+
+def _path_summary(row: dict, points: list[dict]) -> dict:
+    """What one zone's path is made of, for diagnostics: no coordinates (#15).
+
+    A zone mowed over three days with breaks came back as its edge and an
+    empty middle, while the app showed it all but cut. Whether the cloud keeps
+    only the stretch after the last resume can be read only from the answer:
+    the row's own fields, the point fields ``pid`` and ``pt`` (meaning not
+    known yet), how often ``pid`` changes along the path, and any point times.
+    """
+    pids = [p.get("pid") for p in points]
+    summary: dict[str, Any] = {
+        "row": {
+            k: v for k, v in row.items()
+            if k != "points" and (v is None or isinstance(v, (str, int, float, bool)))
+        },
+        "row_lists": sorted(
+            str(k) for k, v in row.items() if k != "points" and isinstance(v, (list, dict))
+        ),
+        "points": len(points),
+        "point_fields": sorted({str(k) for p in points for k in p}),
+        "pid": _value_counts(pids),
+        "pid_changes": sum(1 for a, b in zip(pids, pids[1:]) if a != b),
+        "pt": _value_counts([p.get("pt") for p in points]),
+    }
+    times: dict[str, list[float]] = {}
+    for p in points:
+        stamp = _as_float(p.get("timestamp"))
+        if stamp:
+            span = times.setdefault(str(p.get("pid")), [stamp, stamp])
+            span[0], span[1] = min(span[0], stamp), max(span[1], stamp)
+    if times:
+        summary["pid_times"] = dict(list(times.items())[:_PATH_SUMMARY_VALUES])
+    return summary
+
+
 def _parse_path_row(row: dict) -> dict | None:
-    """One zone of the mower's path: ``{zone, start, pct, points, blade_off}``.
+    """One zone of the mower's path: ``{zone, start, pct, points, blade_off, summary}``.
 
     ``points`` are ``[x, y, cut]``, ``cut`` True for kr "01", False for "00",
     None when the field is missing or something else. Thinned to
@@ -854,10 +904,9 @@ def _parse_path_row(row: dict) -> dict | None:
     zid = _as_int(row.get("partitionId"))
     if not zid or zid <= 0:
         return None
+    raw_points = [p for p in row.get("points") or [] if isinstance(p, dict)]
     points: list[list] = []
-    for p in row.get("points") or []:
-        if not isinstance(p, dict):
-            continue
+    for p in raw_points:
         x, y = _as_float(p.get("x")), _as_float(p.get("y"))
         if x is None or y is None:
             continue
@@ -875,6 +924,7 @@ def _parse_path_row(row: dict) -> dict | None:
         "pct": _as_int(row.get("partitionPercentage")),
         "points": points,
         "blade_off": sum(1 for p in points if p[2] is False),
+        "summary": _path_summary(row, raw_points),
     }
 
 
@@ -1576,7 +1626,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 own = trail_zones.get(zid) or []
                 tail = own[min(self._path_marks.get(zid, len(own)), len(own)):]
                 draw[zid] = _path_runs(path["points"], self.blade_gaps, tail)
-                zones[zid] = {"points": len(path["points"]), "blade_off": path["blade_off"], "tail": len(tail)}
+                zones[zid] = {
+                    "points": len(path["points"]),
+                    "blade_off": path["blade_off"],
+                    "tail": len(tail),
+                    "summary": path.get("summary"),
+                }
         return draw, {"state": self._path_status, "blade_gaps": self.blade_gaps, "zones": zones}
 
     def _maybe_fetch_map(self, raw: dict) -> None:

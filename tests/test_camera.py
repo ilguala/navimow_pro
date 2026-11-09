@@ -171,6 +171,26 @@ def test_trail_is_clipped_to_the_zones():
     assert 'clip-path="url(#zones)"' in svg
 
 
+def test_off_limit_areas_are_cut_out_of_the_trail():
+    data = {
+        "trail": [[1 + i * 0.5, 5] for i in range(17)],
+        "position": {"x": 9, "y": 5},
+        "map": {"zones": [zone(1, "Lawn", 0, 0, 10, 10)],
+                "obstacles": [[[4, 4], [6, 4], [6, 6], [4, 6]], [[1, 1], [2, 2]]]},
+    }
+    _, svg = render(data)
+    root = ET.fromstring(svg)
+    [mask] = list(root.iter(f"{SVG}mask"))
+    holes = [p for p in mask.iter(f"{SVG}polygon") if p.get("fill") == "black"]
+    assert len(holes) == 1  # a two-point "area" is not one
+    assert 'clip-path="url(#zones)" mask="url(#off_limit)"' in svg
+
+
+def test_without_off_limit_areas_there_is_no_mask():
+    _, svg = render(many_zone_map())
+    assert "<mask" not in svg and 'mask="' not in svg
+
+
 def test_trail_without_zones_is_drawn_unclipped():
     data = {"trail": [[0, 0], [1, 1], [2, 1]], "position": {"x": 2, "y": 1}}
     _, svg = render(data)
