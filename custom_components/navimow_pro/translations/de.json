@@ -103,6 +103,12 @@
       "hours_month": {
         "name": "Mähzeit diesen Monat"
       },
+      "zone_last_mowed": {
+        "name": "{zone} zuletzt gemäht"
+      },
+      "zone_last_completed": {
+        "name": "{zone} zuletzt fertig gemäht"
+      },
       "weather_hold": {
         "name": "Wetterpause",
         "state": {

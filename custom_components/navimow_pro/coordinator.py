@@ -1086,6 +1086,7 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
                 "finished": fin,
                 "pct": pct,
                 "end_code": end_code,
+                "end": end_time,
             }
         )
     if not zones:
@@ -1098,6 +1099,60 @@ def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
         "last_end_code": last_end[1],
         "zones": zones,
     }
+
+
+# A zone's finished area must grow by more than this (m2) to count as mowed.
+_ZONE_GROWTH_M2 = 0.1
+
+
+def _unix(value: Any) -> float | None:
+    """A cloud time as Unix seconds: None for 0 or nothing, milliseconds scaled."""
+    stamp = _as_float(value)
+    if not stamp or stamp <= 0:
+        return None
+    return stamp / 1000.0 if stamp > 1e11 else stamp
+
+
+def _zone_times(stored: dict[int, dict], zones: list[dict], now: float) -> dict[int, dict]:
+    """When each zone was last mowed and last completed, as Unix seconds.
+
+    ``stored`` is the previous answer, ``zones`` the coverage zones (id, name,
+    finished area, percentage, end time). A zone was mowed when its finished
+    area has grown since it was last seen, or at its end time if that is later
+    -- which also covers a mow while Home Assistant was off. It was completed
+    at the end time of a session that left it at 100 %, or, with no end time,
+    when it was seen reaching 100 %. A zone started over keeps both: that is
+    what they are for. Zones no longer reported are dropped.
+    """
+    out: dict[int, dict] = {}
+    for zone in zones:
+        zid = zone.get("id")
+        if zid is None:
+            continue
+        before = stored.get(zid) or {}
+        mowed, completed = before.get("mowed"), before.get("completed")
+        fin, pct, end = zone.get("finished"), zone.get("pct"), _unix(zone.get("end"))
+        if end is not None:
+            end = min(end, now)
+        prev_fin, prev_pct = before.get("finished"), before.get("pct")
+        if fin is not None and prev_fin is not None and fin > prev_fin + _ZONE_GROWTH_M2:
+            mowed = now
+        if end is not None and (mowed is None or end > mowed):
+            mowed = end
+        if pct is not None and pct >= 100:
+            if end is not None:
+                if completed is None or end > completed:
+                    completed = end
+            elif prev_pct is not None and prev_pct < 100:
+                completed = now
+        out[zid] = {
+            "name": zone.get("name") or before.get("name"),
+            "mowed": mowed,
+            "completed": completed,
+            "finished": fin if fin is not None else prev_fin,
+            "pct": pct if pct is not None else prev_pct,
+        }
+    return out
 
 
 def _swath_width_m(device_info: Any) -> float:
@@ -1242,6 +1297,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._trail_tail: tuple[float, float] | None = None
         # Each zone's coverage as last seen: a fall is the cloud starting it over.
         self._zone_pct: dict[int, int] = {}
+        # When each zone was last mowed and last completed (see _zone_times),
+        # persisted with the trail.
+        self._zone_times: dict[int, dict] = {}
         # Where each zone's trail stood when the mower last left the dock: what
         # comes after belongs to the job now running and survives its reset.
         self._trail_marks: dict[int, int] = {}
@@ -1372,10 +1430,24 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 zid, val = _as_int(key), _as_int(pct)
                 if zid is not None and val is not None:
                     zone_pct[zid] = val
+        zone_times: dict[int, dict] = {}
+        if isinstance(data.get("zone_times"), dict):
+            for key, row in data["zone_times"].items():
+                zid = _as_int(key)
+                if zid is None or not isinstance(row, dict):
+                    continue
+                zone_times[zid] = {
+                    "name": row.get("name") if isinstance(row.get("name"), str) else None,
+                    "mowed": _as_float(row.get("mowed")),
+                    "completed": _as_float(row.get("completed")),
+                    "finished": _as_float(row.get("finished")),
+                    "pct": _as_int(row.get("pct")),
+                }
         with self._trail_lock:
             self._trail_zones = zones
             self._trail_split_pending = split
             self._zone_pct = zone_pct
+            self._zone_times = zone_times
             prev = data.get("prev_state_code")
             self._prev_state_code = prev if isinstance(prev, str) else None
         _LOGGER.debug(
@@ -1391,6 +1463,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 "prev_state_code": self._prev_state_code,
                 "zones": {str(z): list(p) for z, p in self._trail_zones.items() if p},
                 "zone_pct": {str(z): v for z, v in self._zone_pct.items()},
+                "zone_times": {str(z): dict(v) for z, v in self._zone_times.items()},
             }
 
     # ------------------------------------------------------------------ poll
@@ -1958,6 +2031,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         trail_zones = self._update_trail(
             position, state_code, active_id, active_pct, coverage, map_geom.get("zones")
         )
+        zone_times = self._update_zone_times(coverage)
         path_zones, path_status = self._path_snapshot(trail_zones)
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
@@ -2098,6 +2172,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # ({zone id: [[x,y],...]}, 0 = no zone reported) and all of it as one
             # list, for anything that wants the whole lawn.
             "coverage": coverage,
+            # when each zone was last mowed and last completed: {id: {name,
+            # mowed, completed}}, Unix seconds or None
+            "zone_times": zone_times,
             # the app's messages, newest first (None: the feed did not answer)
             "messages": _parse_messages(raw.get("messages")),
             # the app's mowing reports: in all and this month (values None when
@@ -2207,6 +2284,29 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             maintenance.get("chassis")
         )
         return result
+
+    def _update_zone_times(self, coverage: dict | None) -> dict[int, dict]:
+        """Bring each zone's last mow and completion up to date (see _zone_times).
+
+        With no coverage answer the last known times stand. Persisted with the
+        trail whenever a time changes.
+        """
+        with self._trail_lock:
+            zones = (coverage or {}).get("zones") or []
+            if zones:
+                times = _zone_times(self._zone_times, zones, time.time())
+                if any(
+                    (times.get(z) or {}).get(k) != (self._zone_times.get(z) or {}).get(k)
+                    for z in set(times) | set(self._zone_times)
+                    for k in ("mowed", "completed", "name")
+                ):
+                    self._trail_dirty = True
+                self._zone_times = times
+            return {
+                zid: {"name": row.get("name"), "mowed": row.get("mowed"),
+                      "completed": row.get("completed")}
+                for zid, row in self._zone_times.items()
+            }
 
     def _update_trail(
         self,

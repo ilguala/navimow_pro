@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -21,7 +22,7 @@ from homeassistant.const import (
     UnitOfLength,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -387,6 +388,52 @@ async def async_setup_entry(
         if stale:
             registry.async_remove(stale)
     async_add_entities(keep)
+
+    # Two per zone, added as zones turn up: the coverage answer may come after
+    # setup, and a zone added in the app later still. A zone deleted in the app
+    # leaves its sensors unavailable, to be removed by hand.
+    known: set[int] = set()
+
+    @callback
+    def _add_zone_sensors() -> None:
+        zones = (coordinator.data or {}).get("zone_times") or {}
+        new = [zid for zid in zones if zid not in known]
+        if not new:
+            return
+        known.update(new)
+        async_add_entities(
+            NavimowZoneTimeSensor(coordinator, zid, zones[zid].get("name") or f"Zone {zid}", which)
+            for zid in new
+            for which in ("mowed", "completed")
+        )
+
+    _add_zone_sensors()
+    entry.async_on_unload(coordinator.async_add_listener(_add_zone_sensors))
+
+
+class NavimowZoneTimeSensor(NavimowEntity, SensorEntity):
+    """When one zone was last mowed, or last completed (reached 100 %)."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(
+        self, coordinator: NavimowCoordinator, zid: int, name: str, which: str
+    ) -> None:
+        super().__init__(coordinator, f"zone_{zid}_last_{which}")
+        self._zid = zid
+        self._which = which
+        self._attr_translation_key = f"zone_last_{which}"
+        self._attr_translation_placeholders = {"zone": name}
+        self._attr_icon = "mdi:calendar-check" if which == "completed" else "mdi:calendar-clock"
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._zid in (self.data.get("zone_times") or {})
+
+    @property
+    def native_value(self) -> datetime | None:
+        stamp = ((self.data.get("zone_times") or {}).get(self._zid) or {}).get(self._which)
+        return datetime.fromtimestamp(stamp, tz=timezone.utc) if stamp else None
 
 
 class NavimowSensor(NavimowEntity, SensorEntity):

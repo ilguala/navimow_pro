@@ -103,6 +103,12 @@
       "hours_month": {
         "name": "Mowing time this month"
       },
+      "zone_last_mowed": {
+        "name": "{zone} last mowed"
+      },
+      "zone_last_completed": {
+        "name": "{zone} last completed"
+      },
       "weather_hold": {
         "name": "Weather hold",
         "state": {

@@ -103,6 +103,12 @@
       "hours_month": {
         "name": "Ore di taglio questo mese"
       },
+      "zone_last_mowed": {
+        "name": "{zone} ultimo taglio"
+      },
+      "zone_last_completed": {
+        "name": "{zone} ultimo completamento"
+      },
       "weather_hold": {
         "name": "Sospensione meteo",
         "state": {
