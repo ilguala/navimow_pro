@@ -84,9 +84,11 @@ state, which is what a notification automation wants:
 
 Every event carries `state`, `state_code`, `mowing_progress`, `current_zone` and
 `battery`. The status code alone cannot tell "finished" from "back to charge":
-"Docked (finished)" is reported after every return, whatever the progress. Only
+the mower reports the same one after every return, whatever the progress. Only
 the 100 % can, so a job that is interrupted and resumed finishes once, at the
-end. Events are not replayed for what happened while Home Assistant was down.
+end. The Status sensor reads the progress too: *Docked (finished)* at 100 %,
+below it *Charging (job unfinished)* until the battery reaches the charge
+limit, then *Docked (job unfinished)*. Events are not replayed for what happened while Home Assistant was down.
 
 ```yaml
 automation:

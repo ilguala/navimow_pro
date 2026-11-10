@@ -67,6 +67,7 @@ from .const import (
     SLOW_REFRESH_EVERY,
     SWATH_WIDTH_M,
     STATE_FAMILY_LABELS,
+    STATE_IDLE_DOCKED_POST,
     STATE_MOWING,
     STATE_RETURNING,
     TRAIL_MAX_POINTS,
@@ -696,15 +697,32 @@ def _parse_work_position(raw: Any) -> tuple[int | None, float | None]:
     return zone_id, round(progress / 100, 2) if progress != 0xFFFFFFFF else None
 
 
-def _state_label(state_code: str) -> str:
+def _state_label(
+    state_code: str,
+    progress: int | None = None,
+    battery: int | None = None,
+    charge_limit: int | None = None,
+) -> str:
     """Readable state; unknown codes fall back to their family, not "Unknown".
 
     Only five codes are individually known, but the first byte reliably tells the
     family -- so an unrecognised 03xx still reads "Stopped (fault)" rather than
     leaving the user staring at a number.
+
+    The code a mower reports back in the dock after a trip (0102) is the same
+    whether the job is done or it came back halfway to charge, so only the
+    job's progress tells them apart: finished at 100 %, below it charging until
+    the battery reaches the charge limit, then waiting to resume.
     """
     if not state_code:
         return "Unknown"
+    if state_code == STATE_IDLE_DOCKED_POST:
+        if progress is None:
+            return "Docked"
+        if progress < 100:
+            if battery is not None and battery < (charge_limit or 100):
+                return "Charging (job unfinished)"
+            return "Docked (job unfinished)"
     known = VEHICLE_STATE_LABELS.get(state_code)
     if known:
         return known
@@ -2003,6 +2021,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
 
         state_code = str(index2.get("vehicle_state") or auth.get("vehicle_state") or "")
         battery = _as_int(index2.get("soc") if index2.get("soc") is not None else auth.get("soc"))
+        mowing_progress = _as_int(
+            _find(location, "mowing_percentage", "mowingPercentage", "progress")
+        )
         network_status = _as_int(index2.get("network_status"))
         online = network_status == 1 if network_status is not None else None
 
@@ -2145,7 +2166,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # core state
             "battery": battery,
             "state_code": state_code,
-            "state": _state_label(state_code),
+            "state": _state_label(
+                state_code,
+                mowing_progress,
+                battery,
+                _as_int(_find(set_list, "chargingLimit")),
+            ),
             "activity": activity,
             "online": online,
             "docked": is_docked(state_code),
@@ -2154,7 +2180,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # Raw codes, so an automation can match a number instead of prose.
             "error_codes": error_codes,
             # progress / areas
-            "mowing_progress": _as_int(_find(location, "mowing_percentage", "mowingPercentage", "progress")),
+            "mowing_progress": mowing_progress,
             "session_area": _as_float(location.get("subtotal_area")),
             "weekly_area": _as_float(location.get("mowing_week_area")),
             "total_area": (
