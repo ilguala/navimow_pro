@@ -61,6 +61,7 @@ from .const import (
     ERROR_RESUME_HINT,
     is_docked,
     state_activity,
+    ACTIVITY_MOWING,
     KNOWN_STATES,
     OPT_ZONES,
     SLOW_REFRESH_EVERY,
@@ -1113,13 +1114,22 @@ def _unix(value: Any) -> float | None:
     return stamp / 1000.0 if stamp > 1e11 else stamp
 
 
-def _zone_times(stored: dict[int, dict], zones: list[dict], now: float) -> dict[int, dict]:
+def _zone_times(
+    stored: dict[int, dict],
+    zones: list[dict],
+    now: float,
+    mowing: bool = False,
+    working: int | None = None,
+) -> dict[int, dict]:
     """When each zone was last mowed and last completed, as Unix seconds.
 
     ``stored`` is the previous answer, ``zones`` the coverage zones (id, name,
     finished area, percentage, end time). A zone was mowed when its finished
-    area has grown since it was last seen, or at its end time if that is later
-    -- which also covers a mow while Home Assistant was off. It was completed
+    area has grown since it was last seen while the mower is mowing it --
+    ``working``, the zone it reports, or any zone when it reports none -- or at
+    its end time if that is later, which also covers a mow while Home
+    Assistant was off. Growth at any other time is the cloud working a zone's
+    area out again once a mow is over, not a mow. It was completed
     at the end time of a session that left it at 100 %, or, with no end time,
     when it was seen reaching 100 %. A zone started over keeps both: that is
     what they are for. Zones no longer reported are dropped.
@@ -1135,7 +1145,13 @@ def _zone_times(stored: dict[int, dict], zones: list[dict], now: float) -> dict[
         if end is not None:
             end = min(end, now)
         prev_fin, prev_pct = before.get("finished"), before.get("pct")
-        if fin is not None and prev_fin is not None and fin > prev_fin + _ZONE_GROWTH_M2:
+        if (
+            mowing
+            and (working is None or working == zid)
+            and fin is not None
+            and prev_fin is not None
+            and fin > prev_fin + _ZONE_GROWTH_M2
+        ):
             mowed = now
         if end is not None and (mowed is None or end > mowed):
             mowed = end
@@ -2031,7 +2047,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         trail_zones = self._update_trail(
             position, state_code, active_id, active_pct, coverage, map_geom.get("zones")
         )
-        zone_times = self._update_zone_times(coverage)
+        zone_times = self._update_zone_times(
+            coverage,
+            state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY) == ACTIVITY_MOWING,
+            active_id or None,
+        )
         path_zones, path_status = self._path_snapshot(trail_zones)
 
         activity = state_activity(state_code, VEHICLE_STATE_TO_ACTIVITY)
@@ -2285,7 +2305,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         )
         return result
 
-    def _update_zone_times(self, coverage: dict | None) -> dict[int, dict]:
+    def _update_zone_times(
+        self, coverage: dict | None, mowing: bool = False, working: int | None = None
+    ) -> dict[int, dict]:
         """Bring each zone's last mow and completion up to date (see _zone_times).
 
         With no coverage answer the last known times stand. Persisted with the
@@ -2294,7 +2316,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         with self._trail_lock:
             zones = (coverage or {}).get("zones") or []
             if zones:
-                times = _zone_times(self._zone_times, zones, time.time())
+                times = _zone_times(self._zone_times, zones, time.time(), mowing, working)
                 if any(
                     (times.get(z) or {}).get(k) != (self._zone_times.get(z) or {}).get(k)
                     for z in set(times) | set(self._zone_times)

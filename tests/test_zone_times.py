@@ -26,18 +26,37 @@ def test_first_sight_without_an_end_time_knows_nothing_yet():
 
 def test_growing_area_is_a_mow_now():
     before = _zone_times({}, [zone(fin=50.0)], NOW - 60)
-    times = _zone_times(before, [zone(fin=52.0)], NOW)
+    times = _zone_times(before, [zone(fin=52.0)], NOW, mowing=True, working=4)
     assert times[4]["mowed"] == NOW and times[4]["completed"] is None
+
+
+def test_growing_area_with_no_zone_reported_is_a_mow_too():
+    before = _zone_times({}, [zone(fin=50.0)], NOW - 60)
+    assert _zone_times(before, [zone(fin=52.0)], NOW, mowing=True)[4]["mowed"] == NOW
+
+
+def test_growing_area_after_the_mow_is_not_a_mow():
+    # Seen live: once a mow is over the cloud works a zone's area out again,
+    # and its finished area grows with it while the mower sits in the dock.
+    before = _zone_times({}, [zone(fin=165.8, pct=100, end=1_000)], NOW - 60)
+    times = _zone_times(before, [zone(fin=167.0, pct=100, end=1_000)], NOW)
+    assert times[4]["mowed"] == 1_000
+
+
+def test_growing_area_of_another_zone_is_not_a_mow():
+    before = _zone_times({}, [zone(4, fin=50.0), zone(5, fin=10.0)], NOW - 60)
+    times = _zone_times(before, [zone(4, fin=52.0), zone(5, fin=12.0)], NOW, mowing=True, working=5)
+    assert times[4]["mowed"] is None and times[5]["mowed"] == NOW
 
 
 def test_jitter_is_not_a_mow():
     before = _zone_times({}, [zone(fin=50.0)], NOW - 60)
-    assert _zone_times(before, [zone(fin=50.05)], NOW)[4]["mowed"] is None
+    assert _zone_times(before, [zone(fin=50.05)], NOW, mowing=True)[4]["mowed"] is None
 
 
 def test_reaching_100_without_an_end_time_completes_now():
     before = _zone_times({}, [zone(fin=98.0, pct=98)], NOW - 60)
-    times = _zone_times(before, [zone(fin=100.0, pct=100)], NOW)
+    times = _zone_times(before, [zone(fin=100.0, pct=100)], NOW, mowing=True, working=4)
     assert times[4]["completed"] == NOW and times[4]["mowed"] == NOW
 
 
