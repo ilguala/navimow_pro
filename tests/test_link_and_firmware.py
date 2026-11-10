@@ -228,6 +228,26 @@ def test_a_later_version_reaches_the_device_page(mower, monkeypatch):
     assert registry.updates == [("dev1", {"sw_version": "1.0.5.D"})]
 
 
+class _NewRegistry(_Registry):
+    """A newer Home Assistant: the device is looked up per config entry."""
+
+    def async_get_device(self, identifiers):
+        raise AssertionError("deprecated lookup used")
+
+    def async_get_device_by_identifier(self, identifier, config_entry_id):
+        assert identifier == (DOMAIN, "SN1") and config_entry_id == "e1"
+        return self.device
+
+
+def test_the_device_is_looked_up_per_config_entry(mower, monkeypatch):
+    co, later = mower
+    registry = _NewRegistry(SimpleNamespace(id="dev1", sw_version=None))
+    monkeypatch.setattr(coord_mod, "dr", SimpleNamespace(async_get=lambda hass: registry))
+    later(0)
+    co._sync_sw_version()
+    assert registry.updates == [("dev1", {"sw_version": "1.0.5.D"})]
+
+
 def test_no_device_yet_is_left_to_the_entities(mower, monkeypatch):
     co, later = mower
     registry = _Registry(None)

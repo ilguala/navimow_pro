@@ -1684,7 +1684,14 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             return
         try:
             registry = dr.async_get(self.hass)
-            device = registry.async_get_device(identifiers={(DOMAIN, self.sn)})
+            # A newer Home Assistant keeps identifiers unique per config entry
+            # and deprecates the lookup across all of them (it stops working
+            # in 2027.8); an older one has only that lookup.
+            by_identifier = getattr(registry, "async_get_device_by_identifier", None)
+            if by_identifier is not None:
+                device = by_identifier((DOMAIN, self.sn), self.entry.entry_id)
+            else:
+                device = registry.async_get_device(identifiers={(DOMAIN, self.sn)})
             if device is None:
                 return  # not registered yet: the entities' device info carries it
             if device.sw_version != version:
