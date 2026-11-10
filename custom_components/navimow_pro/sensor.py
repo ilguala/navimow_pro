@@ -13,13 +13,20 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength
+from homeassistant.const import (
+    DEGREE,
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfArea,
+    UnitOfLength,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import NavimowCoordinator, signal_idle
+from .coordinator import WEATHER_HOLD_STATES, NavimowCoordinator, signal_idle
 from .entity import NavimowEntity
 
 
@@ -139,6 +146,62 @@ SENSORS: tuple[NavimowSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
         state_class=SensorStateClass.TOTAL_INCREASING,
         value_fn=lambda d: d.get("weekly_area"),
+    ),
+    # The app's mowing reports, which the cloud works out once a day: they
+    # catch up with a mow by the next day at the latest.
+    NavimowSensorDescription(
+        key="mowed_total",
+        translation_key="mowed_total",
+        icon="mdi:counter",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda d: (d.get("reports") or {}).get("mowed_total"),
+    ),
+    NavimowSensorDescription(
+        key="mowed_month",
+        translation_key="mowed_month",
+        icon="mdi:calendar-month",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda d: (d.get("reports") or {}).get("mowed_month"),
+    ),
+    NavimowSensorDescription(
+        key="hours_total",
+        translation_key="hours_total",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: (d.get("reports") or {}).get("hours_total"),
+    ),
+    NavimowSensorDescription(
+        key="hours_month",
+        translation_key="hours_month",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: (d.get("reports") or {}).get("hours_month"),
+    ),
+    NavimowSensorDescription(
+        key="weather_hold",
+        translation_key="weather_hold",
+        icon="mdi:weather-cloudy-clock",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(WEATHER_HOLD_STATES),
+        # Whether the mower is holding for rain, snow, frost, wind or heat; all
+        # that hold it now in the attributes, when more than one does.
+        value_fn=lambda d: (d.get("weather") or {}).get("state"),
+        attrs_fn=lambda d: (
+            {
+                "active": d["weather"]["active"],
+                "rain_level": d["weather"]["rain_level"],
+            }
+            if d.get("weather")
+            else None
+        ),
     ),
     NavimowSensorDescription(
         key="total_area",

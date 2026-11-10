@@ -108,6 +108,24 @@ _TRAIL_SAVE_DELAY = 60
 # day; after a failed read, again in half an hour.
 _FIRMWARE_REFRESH_S = 12 * 3600
 _FIRMWARE_RETRY_S = 1800
+
+# The app's mowing reports (totals and this month). The cloud works them out
+# once a day, so an hourly read is plenty; after a failure, again in 10 minutes.
+_REPORTS_REFRESH_S = 3600
+_REPORTS_RETRY_S = 600
+# The weather hold: every 5 minutes, and every minute while one lasts.
+_WEATHER_IDLE_S = 300
+_WEATHER_HOLD_S = 60
+# What holds the mower, in the order one is named when several do at once,
+# with the field get-vehicle-weather reports it in.
+_WEATHER_FIELDS = (
+    ("rain", "rainState"),
+    ("snow", "snowState"),
+    ("frost", "frostState"),
+    ("wind", "stormState"),
+    ("heat", "highTemperatureState"),
+)
+WEATHER_HOLD_STATES = ("none", *(name for name, _ in _WEATHER_FIELDS))
 _FIRMWARE_WIRE = re.compile(r"0[0-9A-Fa-f]{3}")
 
 
@@ -987,6 +1005,46 @@ def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) ->
     return {"path": runs, "tail": joined}
 
 
+def _parse_reports(total: Any, month: Any) -> dict[str, float | None]:
+    """The app's mowing reports: area mowed (m2) and time (h), in all and this month."""
+    total = total if isinstance(total, dict) else {}
+    month = month if isinstance(month, dict) else {}
+    area = month.get("mowingArea")
+    duration = month.get("mowingDuration")
+    return {
+        "mowed_total": _as_float(total.get("totalMowingArea")),
+        "hours_total": _as_float(total.get("totalMowingTime")),
+        "mowed_month": _as_float(area.get("totalArea")) if isinstance(area, dict) else None,
+        "hours_month": (
+            _as_float(duration.get("totalDuration")) if isinstance(duration, dict) else None
+        ),
+    }
+
+
+def _parse_weather(payload: Any) -> dict | None:
+    """Whether the mower is holding for the weather: ``{state, active, rain_level}``.
+
+    Each field is 0 or 1. ``state`` names the first hold in _WEATHER_FIELDS
+    order, "none" when every field is 0; a value other than 0 or 1 is left
+    unknown rather than guessed. None when the cloud sent none of the fields.
+    """
+    if not isinstance(payload, dict) or not any(key in payload for _, key in _WEATHER_FIELDS):
+        return None
+    active: list[str] = []
+    unclear = False
+    for name, key in _WEATHER_FIELDS:
+        value = _as_int(payload.get(key))
+        if value == 1:
+            active.append(name)
+        elif value != 0:
+            unclear = True
+    return {
+        "state": active[0] if active else (None if unclear else "none"),
+        "active": active,
+        "rain_level": payload.get("rainLevel"),
+    }
+
+
 def _parse_coverage(raw_list: Any, zone_names: dict) -> dict | None:
     """Per-zone mowing coverage from get-path-info-time.
 
@@ -1216,6 +1274,11 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._messages_state: str | None = None
         self._messages_until = 0.0
         self._messages_read = 0.0
+        # The mowing reports and the weather hold: when each is next read, and
+        # the month the reports were read for (a new month reads them at once).
+        self._reports_next = 0.0
+        self._reports_month: str | None = None
+        self._weather_next = 0.0
         # A fault, and how many polls in a row have since reported nothing. The
         # fault is held over a short run of quiet polls (see _hold_error).
         self._error_held: tuple[str | None, list[str]] | None = None
@@ -1522,6 +1585,8 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
                 raw.setdefault("messages", {})
 
         self._maybe_fetch_path(raw, state_code)
+        self._maybe_fetch_reports(raw)
+        self._maybe_fetch_weather(raw)
 
         # Slow, only every N cycles (or on the first successful fetch).
         if slow:
@@ -1563,6 +1628,49 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._firmware_next = now + _FIRMWARE_REFRESH_S
         if version:
             self.sw_version = version
+
+    def _maybe_fetch_reports(self, raw: dict) -> None:
+        """Read the app's mowing reports hourly, and at once when a month begins.
+
+        A month's figure must not outlive its month, so it is dropped when the
+        month changes, before the new one is asked for.
+        """
+        now = time.monotonic()
+        today = dt_util.now().date()
+        month = f"{today.year}-{today.month}"
+        if now < self._reports_next and month == self._reports_month:
+            return
+        if month != self._reports_month:
+            raw.pop("report_month", None)
+        self._reports_month = month
+        query_time = f"{today.year}-{today.month}-{today.day}"
+        answered = False
+        for key, getter in (
+            ("report_total", lambda: self.client.report_total(self.sn)),
+            ("report_month", lambda: self.client.report_month(self.sn, query_time)),
+        ):
+            try:
+                raw[key] = getter()
+                answered = True
+            except NavimowAuthError:
+                raise
+            except NavimowError:
+                raw.setdefault(key, {})
+        self._reports_next = now + (_REPORTS_REFRESH_S if answered else _REPORTS_RETRY_S)
+
+    def _maybe_fetch_weather(self, raw: dict) -> None:
+        """Read the weather hold every few minutes, every minute while one lasts."""
+        now = time.monotonic()
+        if now < self._weather_next:
+            return
+        try:
+            raw["weather"] = self.client.weather(self.sn)
+        except NavimowAuthError:
+            raise
+        except NavimowError:
+            raw.setdefault("weather", {})
+        hold = (_parse_weather(raw.get("weather")) or {}).get("state")
+        self._weather_next = now + (_WEATHER_HOLD_S if hold not in (None, "none") else _WEATHER_IDLE_S)
 
     def _sync_sw_version(self) -> None:
         """Put a firmware version read after startup on the device page.
@@ -1985,6 +2093,10 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             "coverage": coverage,
             # the app's messages, newest first (None: the feed did not answer)
             "messages": _parse_messages(raw.get("messages")),
+            # the app's mowing reports: in all and this month (values None when
+            # not answered), and whether the mower holds for the weather
+            "reports": _parse_reports(raw.get("report_total"), raw.get("report_month")),
+            "weather": _parse_weather(raw.get("weather")),
             # the mower's own path where known (beta): {zone id: [[[x,y],...], ...]}
             "path_zones": path_zones,
             "path_status": path_status,

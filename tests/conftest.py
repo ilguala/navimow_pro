@@ -15,6 +15,7 @@ import importlib.util
 import sys
 import types
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -105,3 +106,6 @@ if importlib.util.find_spec("homeassistant") is None:
 
     sys.modules["homeassistant.components.switch"].SwitchEntityDescription = SwitchEntityDescription
     sys.modules["homeassistant.const"].EntityCategory = EntityCategory
+    # The coordinator asks for the local date (the mowing reports' month); a
+    # test that cares which date it is patches dt_util itself.
+    sys.modules["homeassistant.util.dt"].now = lambda: datetime.now(timezone.utc)

@@ -91,6 +91,29 @@
       "weekly_area": {
         "name": "Surface tondue cette semaine"
       },
+      "mowed_total": {
+        "name": "Surface tondue au total"
+      },
+      "mowed_month": {
+        "name": "Surface tondue ce mois-ci"
+      },
+      "hours_total": {
+        "name": "Temps de tonte total"
+      },
+      "hours_month": {
+        "name": "Temps de tonte ce mois-ci"
+      },
+      "weather_hold": {
+        "name": "Pause météo",
+        "state": {
+          "none": "Aucune",
+          "rain": "Pluie",
+          "snow": "Neige",
+          "frost": "Gel",
+          "wind": "Vent",
+          "heat": "Chaleur"
+        }
+      },
       "total_area": {
         "name": "Surface totale tondue"
       },

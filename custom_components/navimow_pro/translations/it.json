@@ -91,6 +91,29 @@
       "weekly_area": {
         "name": "Area questa settimana"
       },
+      "mowed_total": {
+        "name": "Area tagliata in totale"
+      },
+      "mowed_month": {
+        "name": "Area questo mese"
+      },
+      "hours_total": {
+        "name": "Ore di taglio in totale"
+      },
+      "hours_month": {
+        "name": "Ore di taglio questo mese"
+      },
+      "weather_hold": {
+        "name": "Sospensione meteo",
+        "state": {
+          "none": "Nessuna",
+          "rain": "Pioggia",
+          "snow": "Neve",
+          "frost": "Gelo",
+          "wind": "Vento",
+          "heat": "Caldo"
+        }
+      },
       "total_area": {
         "name": "Area totale"
       },

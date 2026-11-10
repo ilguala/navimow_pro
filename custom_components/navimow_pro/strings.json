@@ -91,6 +91,29 @@
       "weekly_area": {
         "name": "Area this week"
       },
+      "mowed_total": {
+        "name": "Total mowed area"
+      },
+      "mowed_month": {
+        "name": "Area this month"
+      },
+      "hours_total": {
+        "name": "Total mowing time"
+      },
+      "hours_month": {
+        "name": "Mowing time this month"
+      },
+      "weather_hold": {
+        "name": "Weather hold",
+        "state": {
+          "none": "None",
+          "rain": "Rain",
+          "snow": "Snow",
+          "frost": "Frost",
+          "wind": "Wind",
+          "heat": "Heat"
+        }
+      },
       "total_area": {
         "name": "Total area"
       },

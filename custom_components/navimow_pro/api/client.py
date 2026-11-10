@@ -518,6 +518,37 @@ class NavimowCloudClient:
                 out[key] = {"error": str(err)}
         return out
 
+    def report_total(self, sn: str) -> dict:
+        """The app's mowing report, lifetime totals (read-only).
+
+        ``{totalMowingArea, totalMowingTime, activeTime, ...}``: m2 and hours,
+        both as strings. The cloud works the report out once a day.
+        """
+        return self.call(
+            "/vehicle/report/vehicle-main-report",
+            {"vehicle_sn": sn, "language": self._language},
+        ) or {}
+
+    def report_month(self, sn: str, query_time: str) -> dict:
+        """The app's mowing report for the month of ``query_time`` (``YYYY-M-D``).
+
+        ``{mowingArea: {totalArea}, mowingDuration: {totalDuration}, ...}``, m2
+        and hours as strings, plus the charts the app draws.
+        """
+        return self.call(
+            "/vehicle/report/get-day-week-month-data",
+            {"vehicle_sn": sn, "language": self._language, "query_type": 3,
+             "query_time": query_time},
+        ) or {}
+
+    def weather(self, sn: str) -> dict:
+        """Whether the mower is holding for the weather (read-only).
+
+        ``{rainState, snowState, stormState, frostState, highTemperatureState,
+        rainLevel}``, each state 0 or 1.
+        """
+        return self.call("/vehicle/vehicle/get-vehicle-weather", {"vehicle_sn": sn}) or {}
+
     def firmware_list(self, sn: str, vehicle_type: Any) -> Any:
         """The version of each firmware module on the mower (read-only; #33)."""
         return self.call(

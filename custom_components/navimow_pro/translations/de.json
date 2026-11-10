@@ -91,6 +91,29 @@
       "weekly_area": {
         "name": "Fläche diese Woche"
       },
+      "mowed_total": {
+        "name": "Gemähte Fläche gesamt"
+      },
+      "mowed_month": {
+        "name": "Fläche diesen Monat"
+      },
+      "hours_total": {
+        "name": "Mähzeit gesamt"
+      },
+      "hours_month": {
+        "name": "Mähzeit diesen Monat"
+      },
+      "weather_hold": {
+        "name": "Wetterpause",
+        "state": {
+          "none": "Keine",
+          "rain": "Regen",
+          "snow": "Schnee",
+          "frost": "Frost",
+          "wind": "Wind",
+          "heat": "Hitze"
+        }
+      },
       "total_area": {
         "name": "Gesamtfläche"
       },
