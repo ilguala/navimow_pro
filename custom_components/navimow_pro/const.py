@@ -34,6 +34,7 @@ MOWER_SCALE_MAX: Final = 300
 OPT_MOWER_PATH: Final = "mower_path"
 OPT_BLADE_GAPS: Final = "blade_gaps"
 OPT_REAL_SCENE: Final = "real_scene"
+OPT_CLEAN_MAP: Final = "clean_map"
 
 DEFAULT_LANGUAGE: Final = "en"
 

@@ -64,6 +64,7 @@ from .const import (
     MOWER_SCALE_MAX,
     MOWER_SCALE_MIN,
     OPT_BLADE_GAPS,
+    OPT_CLEAN_MAP,
     OPT_MOWER_PATH,
     OPT_REAL_SCENE,
     OPT_MOWER_SCALE,
@@ -474,6 +475,7 @@ class NavimowOptionsFlow(OptionsFlow):
                     OPT_MOWER_PATH: bool(user_input.get(OPT_MOWER_PATH, True)),
                     OPT_BLADE_GAPS: bool(user_input.get(OPT_BLADE_GAPS, True)),
                     OPT_REAL_SCENE: bool(user_input.get(OPT_REAL_SCENE, False)),
+                    OPT_CLEAN_MAP: bool(user_input.get(OPT_CLEAN_MAP, False)),
                 }
             )
 
@@ -503,6 +505,9 @@ class NavimowOptionsFlow(OptionsFlow):
                 ): BooleanSelector(),
                 vol.Optional(
                     OPT_REAL_SCENE, default=options.get(OPT_REAL_SCENE, False)
+                ): BooleanSelector(),
+                vol.Optional(
+                    OPT_CLEAN_MAP, default=options.get(OPT_CLEAN_MAP, False)
                 ): BooleanSelector(),
             }
         )

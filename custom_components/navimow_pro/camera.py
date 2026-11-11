@@ -30,6 +30,7 @@ from .const import (
     DOMAIN,
     MOWER_SCALE_MAX,
     MOWER_SCALE_MIN,
+    OPT_CLEAN_MAP,
     OPT_MOWER_SCALE,
     SWATH_WIDTH_M,
     TRAIL_BREAK_M,
@@ -206,6 +207,37 @@ async def async_setup_entry(
     async_add_entities([NavimowMapCamera(coordinator)])
 
 
+def _map_status(data: dict) -> str:
+    """The one-line status drawn under the map / shown as an attribute."""
+    cov_pct = (data.get("coverage") or {}).get("overall_pct")
+    cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
+    return f"{data.get('state', '')} · {data.get('battery', '?')}%{cov_txt}"
+
+
+def _map_mowed(data: dict) -> bool:
+    """Whether a mowed layer is drawn: a trail, the mower's path, or a done zone."""
+    if data.get("trail") or data.get("trail_zones") or data.get("path_zones"):
+        return True
+    return any(
+        (z.get("pct") or 0) >= 100 for z in (data.get("coverage") or {}).get("zones") or []
+    )
+
+
+def _map_legend(data: dict) -> list[dict]:
+    """Legend rows (colour + label) for what the map shows right now."""
+    mp = data.get("map") or {}
+    rows = [{"color": _MOWER_ORANGE, "label": "Mower"}]
+    if _map_mowed(data):
+        rows.append({"color": _TRAIL_COLOR, "label": "Mowed"})
+    if mp.get("station"):
+        rows.append({"color": "#455a64", "label": "Dock"})
+    if mp.get("obstacles"):
+        rows.append({"color": _OFF_LIMIT_FILL, "label": "Off-limit area"})
+    if mp.get("vision_off"):
+        rows.append({"color": _VISION_OFF_FILL, "label": "VisionFence off"})
+    return rows
+
+
 class NavimowMapCamera(NavimowEntity, Camera):
     """An SVG map of the lawn: zones, obstacles, no-mow areas, dock, mower."""
 
@@ -214,9 +246,10 @@ class NavimowMapCamera(NavimowEntity, Camera):
     # every few seconds at most, so twice a second (the default) redrew the same
     # picture for nothing.
     _attr_frame_interval = 2.0
-    # Built-in size until __init__ reads the option, so a camera built without
-    # one -- as the tests do -- still draws the mower.
+    # Built-in defaults until __init__ reads the options, so a camera built
+    # without them -- as the tests do -- still renders.
     _mower_scale = 1.0
+    _clean_map = False
 
     def __init__(self, coordinator: NavimowCoordinator) -> None:
         NavimowEntity.__init__(self, coordinator, "map")
@@ -229,6 +262,15 @@ class NavimowMapCamera(NavimowEntity, Camera):
         except (TypeError, ValueError):
             pct = DEFAULT_MOWER_SCALE
         self._mower_scale = max(MOWER_SCALE_MIN, min(MOWER_SCALE_MAX, pct)) / 100.0
+        # With the map card drawing the legend and status as fixed overlays, the
+        # picture leaves them off so they do not move with a zoom.
+        self._clean_map = bool(coordinator.entry.options.get(OPT_CLEAN_MAP, False))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Legend and status, for the map card to pin as fixed overlays."""
+        data = self.data or {}
+        return {"legend": _map_legend(data), "status": _map_status(data)}
 
     def camera_image(
         self, width: int | None = None, height: int | None = None
@@ -355,6 +397,19 @@ class NavimowMapCamera(NavimowEntity, Camera):
         scale = min(_VIEW / span_x, _VIEW / span_y)
         off_x = (_VIEW - span_x * scale) / 2.0
         off_y = (_VIEW - span_y * scale) / 2.0
+
+        # The mower and dock markers are a fixed size, which reads as too big
+        # when the view takes in more than the lawn -- the real scene reaches
+        # past the zones. Shrink them as the view widens past the zones, with a
+        # floor so they stay legible.
+        zone_pts = [p for z in zones for p in (z.get("polygon") or [])]
+        if zone_pts:
+            zxs = [p[0] for p in zone_pts]
+            zys = [p[1] for p in zone_pts]
+            lawn_span = max(max(zxs) - min(zxs), max(zys) - min(zys), 0.1)
+            marker_scale = max(0.5, min(1.0, lawn_span / max(span_x, span_y)))
+        else:
+            marker_scale = 1.0
 
         def sx(x: float) -> float:
             return off_x + (x - min_x) * scale
@@ -553,11 +608,9 @@ class NavimowMapCamera(NavimowEntity, Camera):
 
         # Dock / charging station (small house marker).
         if station and station.get("x") is not None and station.get("y") is not None:
-            parts.append(self._station(sx(station["x"]), sy(station["y"])))
+            parts.append(self._station(sx(station["x"]), sy(station["y"]), marker_scale))
 
-        cov_pct = cov.get("overall_pct")
-        cov_txt = f" · {cov_pct}% mowed" if cov_pct is not None else ""
-        label = f"{data.get('state', '')} · {data.get('battery', '?')}%{cov_txt}"
+        label = _map_status(data)
 
         # Zone labels (rounded pills) -- on top of the mowed layer so they read.
         # Sized to their zone and kept off one another, the legend, the status
@@ -580,13 +633,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
 
         # Mower (robot icon oriented to its heading), over the labels.
         if px is not None and py is not None:
-            parts.append(self._mower(sx(px), sy(py), heading, self._mower_scale))
+            parts.append(self._mower(sx(px), sy(py), heading, self._mower_scale * marker_scale))
 
-        # Legend + status line.
-        parts.append(
-            self._legend(bool(obstacles), bool(vision_off), station is not None, mowed)
-        )
-        parts.append(self._label(12, _VIEW - 12, label, size=14, anchor="start"))
+        # Legend + status line -- left off when the map card pins them instead.
+        if not self._clean_map:
+            parts.append(
+                self._legend(bool(obstacles), bool(vision_off), station is not None, mowed)
+            )
+            parts.append(self._label(12, _VIEW - 12, label, size=14, anchor="start"))
 
         parts.append("</svg>")
         return "".join(parts)
@@ -720,17 +774,24 @@ class NavimowMapCamera(NavimowEntity, Camera):
         )
 
     @staticmethod
-    def _station(cx: float, cy: float) -> str:
+    def _station(cx: float, cy: float, scale: float = 1.0) -> str:
         """A charging-dock icon: a dark base plate with a green charge bolt."""
         bolt = (
             f"M {cx + 1:.1f},{cy - 6:.1f} L {cx - 4:.1f},{cy + 1:.1f} "
             f"L {cx:.1f},{cy + 1:.1f} L {cx - 1:.1f},{cy + 6:.1f} "
             f"L {cx + 4:.1f},{cy - 1:.1f} L {cx:.1f},{cy - 1:.1f} Z"
         )
-        return (
+        inner = (
             f'<rect x="{cx - 11:.1f}" y="{cy - 9:.1f}" width="22" height="18" rx="4" '
             f'fill="#37474f" stroke="#ffffff" stroke-width="2"/>'
             f'<path d="{bolt}" fill="#69f0ae" stroke="#1b5e20" stroke-width="0.6"/>'
+        )
+        if scale == 1.0:
+            return inner
+        # Scaled about the dock's own spot so it stays put.
+        return (
+            f'<g transform="translate({cx:.1f},{cy:.1f}) scale({scale:.2f}) '
+            f'translate({-cx:.1f},{-cy:.1f})">{inner}</g>'
         )
 
     def _legend(

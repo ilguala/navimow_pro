@@ -197,3 +197,18 @@ def test_a_real_scene_is_drawn_even_without_zones():
     data = {"position": {"x": 5, "y": 5}, "trail": [[0, 0], [1, 1]],
             "real_scene": {"bounds": {"minX": 0, "maxX": 4, "minY": 0, "maxY": 4}, "image": IMG}}
     assert "<image" in render(data)
+
+
+def test_the_mower_shrinks_when_the_view_widens_past_the_lawn():
+    import re
+    zones = {"map": {"zones": [zone(1, 0, 0, 10, 10)]}, "position": {"x": 5, "y": 5, "heading": 0},
+             "coverage": {"zones": [{"id": 1, "pct": 40}]}}
+    tight = render(zones)
+    wide = render(dict(zones, real_scene={
+        "bounds": {"minX": -20, "maxX": 30, "minY": -20, "maxY": 30}, "image": IMG}))
+
+    def mscale(svg):
+        return float(re.search(r'rotate\([-\d.]+\) scale\(([\d.]+)\)', svg).group(1))
+
+    assert mscale(tight) > mscale(wide)  # the wider real-scene view draws a smaller mower
+    assert mscale(wide) >= 0.5           # but not below the floor

@@ -59,7 +59,8 @@
           "mower_scale": "Mower size on the map",
           "mower_path": "Draw the mower's own path (beta)",
           "blade_gaps": "Leave out what the app leaves out (beta)",
-          "real_scene": "Show the real scene under the map (beta)"
+          "real_scene": "Show the real scene under the map (beta)",
+          "clean_map": "Clean map (legend and status in the map card)"
         }
       }
     }

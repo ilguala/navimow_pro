@@ -43,13 +43,21 @@ action. Nothing auto-mows on setup or on a poll.
 
 ### Lovelace cards & service
 
-The integration bundles and **auto-registers** two custom cards (no manual
+The integration bundles and **auto-registers** three custom cards (no manual
 Lovelace resource needed) — just add them from the dashboard card picker:
 
 - **`custom:navimow-scheduler-card`** — edit the weekly mowing plan (per-day
   on/off, time periods, per-period zones).
 - **`custom:navimow-mow-card`** — a *Mow now* button that opens a dialog to pick
   a zone (or all) and choose *restart from zero* vs *continue*.
+- **`custom:navimow-map-card`** — the map with zoom, pan and rotation: wheel or
+  the +/− buttons zoom, drag or one finger pans, two fingers pinch, and a button
+  recentres. Turn it with two fingers, Ctrl (or ⌘) and drag for any angle, or
+  the ↻ button for 90°. North is up by default, as in the app; set
+  `default_rotation` (degrees) for a different start. The legend and status are
+  pinned, not drawn into the picture, so turn on the *Clean map* option in
+  *Configure* to keep them off it. The view is per browser; it finds the map
+  camera on its own.
 
 There are three services for automations: **`navimow_pro.mow`** (zones +
 `reset`), **`navimow_pro.set_schedule`**, and **`navimow_pro.resume`**, which

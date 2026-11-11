@@ -36,8 +36,8 @@ PLATFORMS: list[Platform] = [
 # resource by hand. Registered once per HA process (guard in hass.data).
 # Bump _CARD_VER whenever any card JS changes: it is appended as ?v=<ver> to the
 # served URL so browsers fetch the new file instead of a stale cached copy.
-_CARDS = ("navimow-scheduler-card.js", "navimow-mow-card.js")
-_CARD_VER = "5"
+_CARDS = ("navimow-scheduler-card.js", "navimow-mow-card.js", "navimow-map-card.js")
+_CARD_VER = "10"
 _FRONTEND_KEY = f"{DOMAIN}_frontend_registered"
 
 

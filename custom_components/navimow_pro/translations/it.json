@@ -59,7 +59,8 @@
           "mower_scale": "Dimensione del rasaerba sulla mappa",
           "mower_path": "Disegna il percorso del robot (beta)",
           "blade_gaps": "Escludi i tratti che l'app non disegna (beta)",
-          "real_scene": "Mostra la vista reale sotto la mappa (beta)"
+          "real_scene": "Mostra la vista reale sotto la mappa (beta)",
+          "clean_map": "Mappa pulita (legenda e stato nella card mappa)"
         }
       }
     }
