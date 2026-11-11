@@ -309,6 +309,10 @@ unavailable or reads `unknown` rather than the integration crashing:
   Both can be turned off in *Configure*; if the map shows gaps where the mower
   did cut, turn off "Leave out what the app leaves out". The diagnostics
   download lists what each zone's path is made of (#15).
+- **Real scene (beta).** Where the mower scans the lawn from above, *Configure*
+  can turn on the real scene: that view, read from the mower and drawn under the
+  map, as the app's *Real scene* does. Off by default; it does nothing on a
+  mower that provides no such view.
 - **Last message** is the newest entry of the app's message centre (why the
   mower went home, a fault, a rain hold), with the last few as attributes. It is
   read now and then, and for a few minutes after the mower heads home, docks or

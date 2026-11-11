@@ -312,6 +312,14 @@ class NavimowMapCamera(NavimowEntity, Camera):
             stable.extend(vo)
         if station and station.get("x") is not None and station.get("y") is not None:
             stable.append([station["x"], station["y"]])
+        # The real scene is scanned wider than the zones (paths, borders), so
+        # when it is shown the view takes it in too, as the app does.
+        real = data.get("real_scene")
+        if isinstance(real, dict) and real.get("image") and isinstance(real.get("bounds"), dict):
+            rb = real["bounds"]
+            stable.extend([[rb["minX"], rb["minY"]], [rb["maxX"], rb["maxY"]]])
+        else:
+            real = None
 
         dynamic: list[list[float]] = list(trail)
         if px is not None and py is not None:
@@ -362,6 +370,28 @@ class NavimowMapCamera(NavimowEntity, Camera):
             f'viewBox="0 0 {_VIEW} {_VIEW}">'
         ]
 
+        # Real scene (the lawn seen from above): drawn first so
+        # everything else sits on top. Placed by its own XY bounds -- the same
+        # frame as the zones -- and clipped to the zones, as the app does. The
+        # webp is embedded (an SVG shown in an <img> may not load outside refs).
+        real_on = False
+        if real:
+            b = real["bounds"]
+            ix, iy = sx(b["minX"]), sy(b["maxY"])
+            iw = (b["maxX"] - b["minX"]) * scale
+            ih = (b["maxY"] - b["minY"]) * scale
+            if iw > 0 and ih > 0:
+                # Drawn whole, not clipped to the zones: the scan reaches past
+                # them and the app shows all of it; the image is transparent
+                # beyond what was scanned. It stays below everything else.
+                parts.append(
+                    f'<image href="{real["image"]}" x="{ix:.1f}" y="{iy:.1f}" '
+                    f'width="{iw:.1f}" height="{ih:.1f}" preserveAspectRatio="none"/>'
+                )
+                # With the photo under it, the mowed layer and the zone tint
+                # become a light veil so the ground shows, as the app does.
+                real_on = True
+
         # Zones: soft uniform green fill (no border) + a per-segment perimeter
         # (dashed for virtual-boundary edges, solid for ride-on/straddle edges),
         # mirroring the app. Labels are collected and drawn LAST so they sit above
@@ -373,8 +403,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
                 continue
             pts_str = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in poly)
             parts.append(
-                f'<polygon points="{pts_str}" fill="{_ZONE_FILL}" fill-opacity="0.22" '
-                f'stroke="none"/>'
+                f'<polygon points="{pts_str}" fill="{_ZONE_FILL}" '
+                f'fill-opacity="{0.08 if real_on else 0.22}" stroke="none"/>'
             )
             parts.append(self._perimeter(poly, z.get("boundary_flags") or [], sx, sy))
             screen = [(sx(x), sy(y)) for x, y in poly]
@@ -478,7 +508,8 @@ class NavimowMapCamera(NavimowEntity, Camera):
             if defs:
                 parts.append(f'<defs>{"".join(defs)}</defs>')
             parts.append(
-                f'<g opacity="{_TRAIL_OPACITY}"{attrs}>{"".join(trail_parts)}</g>'
+                f'<g opacity="{0.20 if real_on else _TRAIL_OPACITY}"{attrs}>'
+                f'{"".join(trail_parts)}</g>'
             )
 
         # Off-limit areas (the map's "obstacles"), outlined in the app's orange.

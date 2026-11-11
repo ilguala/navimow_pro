@@ -33,6 +33,7 @@ MOWER_SCALE_MAX: Final = 300
 # with the blade stopped left out. Both can be turned off while being tried.
 OPT_MOWER_PATH: Final = "mower_path"
 OPT_BLADE_GAPS: Final = "blade_gaps"
+OPT_REAL_SCENE: Final = "real_scene"
 
 DEFAULT_LANGUAGE: Final = "en"
 

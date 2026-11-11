@@ -559,6 +559,19 @@ class NavimowCloudClient:
     def map_list(self, sn: str) -> Any:
         return self.call("/map/index/map-list", {"vehicle_sn": sn})
 
+    def iot_file(self, sn: str, file_type: int = 2) -> dict:
+        """A download URL for a mower file (read-only).
+
+        ``type`` 2 is the "real scene" / terrain package: a zip with the
+        lawn's orthophoto and a heightmap, georeferenced in the map's own XY.
+        Returns ``{sn, url, version}`` where ``url`` is a short-lived link, or
+        ``{}`` on a mower that has no such file.
+        """
+        return self.call(
+            "/mowerbot/vehicle/common/get-iot-file",
+            {"vehicle_sn": sn, "type": str(file_type)},
+        ) or {}
+
     def messages(self, sn: str) -> dict:
         """The app's message feed for this mower, first page (newest).
 

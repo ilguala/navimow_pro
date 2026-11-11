@@ -58,7 +58,8 @@
           "zones": "Zonen (id:Name,...)",
           "mower_scale": "Größe des Mähroboters auf der Karte",
           "mower_path": "Eigenen Weg des Mähroboters zeichnen (Beta)",
-          "blade_gaps": "Abschnitte auslassen, die die App nicht zeichnet (Beta)"
+          "blade_gaps": "Abschnitte auslassen, die die App nicht zeichnet (Beta)",
+          "real_scene": "Reale Ansicht unter der Karte zeigen (Beta)"
         }
       }
     }

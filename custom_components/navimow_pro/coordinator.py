@@ -15,6 +15,8 @@ import math
 import re
 import threading
 import time
+import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -75,6 +77,7 @@ from .const import (
     ZONE_RESET_DROP,
     OPT_BLADE_GAPS,
     OPT_MOWER_PATH,
+    OPT_REAL_SCENE,
     VEHICLE_STATE_LABELS,
     VEHICLE_STATE_TO_ACTIVITY,
     decode_partition_id_list,
@@ -110,6 +113,12 @@ _TRAIL_SAVE_DELAY = 60
 # day; after a failed read, again in half an hour.
 _FIRMWARE_REFRESH_S = 12 * 3600
 _FIRMWARE_RETRY_S = 1800
+
+# The real-scene package: re-read at most this often, and only
+# when its version changes. The orthophoto is tens-to-hundreds of KB.
+_TERRAIN_REFRESH_S = 1800
+_TERRAIN_RETRY_S = 300
+_TERRAIN_MAX_BYTES = 8_000_000
 
 # The app's mowing reports (totals and this month). The cloud works them out
 # once a day, so an hourly read is plenty; after a failure, again in 10 minutes.
@@ -1024,6 +1033,34 @@ def _path_runs(points: list[list], blade_gaps: bool, tail: list[list[float]]) ->
     return {"path": runs, "tail": joined}
 
 
+def _fetch_terrain(url: str) -> dict | None:
+    """Download the real-scene zip and pull out the orthophoto and its bounds.
+
+    The zip (from get-iot-file type 2) holds ``merge2d_*.webp`` (the lawn seen
+    from above) and ``merge2d_*.json`` with ``minX/maxX/minY/maxY`` in the
+    map's own XY frame. Returns ``{bounds, image}`` with the image as a webp
+    data URI, or ``None`` on any trouble -- the map must never break over it.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 - vendor URL
+            blob = resp.read(_TERRAIN_MAX_BYTES)
+        zf = zipfile.ZipFile(io.BytesIO(blob))
+        names = zf.namelist()
+        jname = next((n for n in names if n.endswith(".json")), None)
+        iname = next((n for n in names if "merge2d" in n and n.endswith(".webp")), None)
+        if not jname or not iname:
+            return None
+        meta = json.loads(zf.read(jname))
+        bounds = {k: _as_float(meta.get(k)) for k in ("minX", "maxX", "minY", "maxY")}
+        if any(v is None for v in bounds.values()) or bounds["maxX"] <= bounds["minX"]:
+            return None
+        image = "data:image/webp;base64," + base64.b64encode(zf.read(iname)).decode()
+        return {"bounds": bounds, "image": image}
+    except Exception:  # noqa: BLE001 - see the docstring
+        _LOGGER.debug("real scene: fetch/parse failed", exc_info=True)
+        return None
+
+
 def _parse_reports(total: Any, month: Any) -> dict[str, float | None]:
     """The app's mowing reports: area mowed (m2) and time (h), in all and this month."""
     total = total if isinstance(total, dict) else {}
@@ -1371,6 +1408,12 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._reports_next = 0.0
         self._reports_month: str | None = None
         self._weather_next = 0.0
+        # The real-scene overlay (opt-in): the parsed terrain, the
+        # version it is for, and when to look again.
+        self._real_scene = bool(options.get(OPT_REAL_SCENE, False))
+        self._terrain: dict | None = None
+        self._terrain_version: Any = None
+        self._terrain_next = 0.0
         # A fault, and how many polls in a row have since reported nothing. The
         # fault is held over a short run of quiet polls (see _hold_error).
         self._error_held: tuple[str | None, list[str]] | None = None
@@ -1694,6 +1737,7 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._maybe_fetch_path(raw, state_code)
         self._maybe_fetch_reports(raw)
         self._maybe_fetch_weather(raw)
+        self._maybe_fetch_terrain()
 
         # Slow, only every N cycles (or on the first successful fetch).
         if slow:
@@ -1735,6 +1779,38 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
         self._firmware_next = now + _FIRMWARE_REFRESH_S
         if version:
             self.sw_version = version
+
+    def _maybe_fetch_terrain(self) -> None:
+        """Read the real-scene package when enabled, only as its version changes.
+
+        A mower without one answers with no URL, so the overlay
+        simply never appears -- the option gates the request, the data gates
+        the drawing.
+        """
+        if not self._real_scene:
+            return
+        now = time.monotonic()
+        if now < self._terrain_next:
+            return
+        try:
+            info = self.client.iot_file(self.sn)
+        except NavimowAuthError:
+            raise
+        except NavimowError:
+            self._terrain_next = now + _TERRAIN_RETRY_S
+            return
+        self._terrain_next = now + _TERRAIN_REFRESH_S
+        url = (info or {}).get("url")
+        version = (info or {}).get("version")
+        if not url:
+            self._terrain = None
+            return
+        if version is not None and version == self._terrain_version and self._terrain:
+            return
+        terrain = _fetch_terrain(url)
+        if terrain:
+            self._terrain = terrain
+            self._terrain_version = version
 
     def _maybe_fetch_reports(self, raw: dict) -> None:
         """Read the app's mowing reports hourly, and at once when a month begins.
@@ -2227,6 +2303,9 @@ class NavimowCoordinator(DataUpdateCoordinator[dict]):
             # not answered), and whether the mower holds for the weather
             "reports": _parse_reports(raw.get("report_total"), raw.get("report_month")),
             "weather": _parse_weather(raw.get("weather")),
+            # the real-scene orthophoto under the map (opt-in):
+            # {bounds:{minX,maxX,minY,maxY}, image:<webp data URI>} or None
+            "real_scene": self._terrain if self._real_scene else None,
             # the mower's own path where known (beta): {zone id: [[[x,y],...], ...]}
             "path_zones": path_zones,
             "path_status": path_status,
