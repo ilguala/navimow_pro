@@ -22,3 +22,9 @@ def test_other_mowers_keep_it(model):
 def test_the_two_setups_differ_only_in_the_order_bit():
     assert mow_setup(reset=True, ordered=False) == 0x21
     assert mow_setup(reset=True, ordered=True) == 0x22
+
+
+@pytest.mark.parametrize("model", ["X315", "X330", "X390"])
+def test_the_x3_keeps_its_charge_limit_now(model):
+    # Segway enabled the charge limit on the X3 in Nov 2026 (#35).
+    assert not model_lacks(model, "charging_limit")

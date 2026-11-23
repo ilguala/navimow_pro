@@ -305,7 +305,7 @@ unavailable or reads `unknown` rather than the integration crashing:
 - **Features a model family lacks.** Every model reports much the same settings,
   so a field being present is not proof the feature exists. A short list of
   field-confirmed exceptions hides what a family does not have -- currently no
-  remote cutting height on the i1, and no charge limit on the X3.
+  remote cutting height on the i1.
 - **Commands are confirmed.** Start (a new mow), Pause and Dock wait a few
   seconds for the mower itself to answer. If it does not, you get an error
   saying so -- but the command may still be carried out, so keep clear of the

@@ -425,9 +425,10 @@ SETTING_CONFIRM_S: Final = 90
 FAMILY_LACKS: Final = (
     # i1 (i105 / i108 / i110): the cutting height is a manual knob.
     ("I1", frozenset({"cut_height_remote"})),
-    # X3 (X315 / X330 / X350 / X390): reports chargingLimit, but the Navimow app
-    # offers no charge limit on it. Two owners, independently.
-    ("X3", frozenset({"charging_limit"})),
+    # The X3 (X315 / X330 / X350 / X390) used to be here: it reports
+    # chargingLimit but the app offered no charge limit, until Segway enabled it
+    # in November 2026, confirmed on an X3 by Subia75 (#35). So the X3 keeps the
+    # entity like everyone else now.
     # First-generation H (H800, H1500): a zone mow with the custom-order bit set
     # (partitionSetup 0x02) is never answered and the mower stays put, while the
     # same zones with auto routing (0x01) are mowed. H800 found by tampiss (#16),
